@@ -1,4 +1,5 @@
-<img src="https://raw.githubusercontent.com/Xmaster6y/xdrl/refs/heads/main/docs/source/_static/images/xdrl-logo.png" alt="logo" width="200"/>
+<div style="display: flex; align-items: flex-start; gap: 20px;">
+<div style="flex: 1;">
 
 # XDRL 🔍
 
@@ -12,6 +13,12 @@
 <a href="https://xdrl.readthedocs.io"><img src="https://img.shields.io/badge/-Read%20the%20Docs%20Here-blue?style=for-the-badge&logo=Read-the-Docs&logoColor=white"></img></a>
 
 Explainability for deep RL.
+
+</div>
+<div style="flex-shrink: 0;">
+<img src="https://raw.githubusercontent.com/Xmaster6y/xdrl/refs/heads/main/docs/source/_static/images/xdrl-logo.png" alt="logo" width="200"/>
+</div>
+</div>
 
 ## Python Config
 
