@@ -1,0 +1,3 @@
+defaults:
+  - nested/third
+  - _self_

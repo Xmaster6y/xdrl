@@ -1,0 +1,3 @@
+defaults:
+  - third
+  - _self_
