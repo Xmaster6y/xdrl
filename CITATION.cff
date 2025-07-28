@@ -1,10 +1,10 @@
 cff-version: 0.1.0
-title: XRL
+title: XDRL
 type: software
 authors:
   - name: Yoann Poupart
-repository-code: 'https://github.com/Xmaster6y/xrl'
-repository-artifact: 'https://github.com/Xmaster6y/xrl/releases/'
+repository-code: 'https://github.com/Xmaster6y/xdrl'
+repository-artifact: 'https://github.com/Xmaster6y/xdrl/releases/'
 keywords:
   - reinforcement learning (RL)
   - explainable AI (XAI)

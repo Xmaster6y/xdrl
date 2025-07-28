@@ -1,5 +1,5 @@
-export PROJECT_NAME="xrl"
-export DISPLAY_NAME="🔬 XRL"
+export PROJECT_NAME="xdrl"
+export DISPLAY_NAME="🔬 XDRL"
 
 mkdir -p $HOME/.ipython/kernels/${PROJECT_NAME}
 cp -r ${WORK}/${PROJECT_NAME}/.venv/share/jupyter/kernels/python3/* $HOME/.ipython/kernels/${PROJECT_NAME}/

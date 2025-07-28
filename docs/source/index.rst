@@ -1,7 +1,7 @@
 :html_theme.sidebar_secondary.remove: true
 :sd_hide_title:
 
-`xrl`
+`xdrl`
 =====
 
 .. toctree::
@@ -21,7 +21,7 @@
     .. grid-item::
         .. div::
 
-          .. image:: _static/images/xrl-logo.svg
+          .. image:: _static/images/xdrl-logo.svg
             :width: 300
             :height: 300
 
@@ -29,13 +29,13 @@
 
         .. div:: sd-fs-1 sd-font-weight-bold title-bot sd-text-primary image-container
 
-            XRL
+            XDRL
 
         .. div:: sd-fs-4 sd-font-weight-bold sd-my-0 sub-bot image-container
 
             Explainable RL for TorchRL
 
-        **xrl** is a package for explaining the decisions of RL agents.
+        **xdrl** is a package for explaining the decisions of RL agents.
 
         .. div:: button-group
 

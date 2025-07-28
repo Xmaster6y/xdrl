@@ -1,2 +1,2 @@
-About `xrl`
+About `xdrl`
 ===========

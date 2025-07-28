@@ -2,10 +2,10 @@
 
 import os
 
-import xrl
+import xdrl
 
 # Project Information
-project = "xrl"
+project = "xdrl"
 copyright = "2025, Yoann Poupart"
 author = "Yoann Poupart"
 
@@ -31,19 +31,19 @@ fixed_sidebar = True
 
 # See https://sphinx-themes.org/ for more
 html_theme = "pydata_sphinx_theme"
-html_title = "xrl"
-html_logo = "_static/images/xrl-logo.svg"
+html_title = "xdrl"
+html_logo = "_static/images/xdrl-logo.svg"
 html_static_path = ["_static"]
 
 html_favicon = "_static/images/favicon.ico"
 html_show_sourcelink = False
 
 # Define the json_url for our version switcher.
-json_url = "https://xrl.readthedocs.io/en/latest/_static/switcher.json"
+json_url = "https://xdrl.readthedocs.io/en/latest/_static/switcher.json"
 
 
 version_match = os.environ.get("READTHEDOCS_VERSION")
-release = xrl.__version__
+release = xdrl.__version__
 # If READTHEDOCS_VERSION doesn't exist, we're not on RTD
 # If it is an integer, we're in a PR build and the version isn't correct.
 # If it's "latest" → change to "dev"
@@ -68,7 +68,7 @@ html_theme_options = {
     "icon_links": [
         {
             "name": "GitHub",
-            "url": "https://github.com/Xmaster6y/xrl",
+            "url": "https://github.com/Xmaster6y/xdrl",
             "icon": "fa-brands fa-github",
         },
         {
