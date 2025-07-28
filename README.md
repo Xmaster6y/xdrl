@@ -1,8 +1,6 @@
-<div style="display: flex; align-items: flex-start; gap: 20px;">
-<div style="flex: 1;">
-
 # XDRL 🔍
 
+[![Documentation](https://img.shields.io/badge/Documentation-blue.svg)](https://xdrl.readthedocs.io)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](https://github.com/Xmaster6y/xdrl/blob/main/LICENSE)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
@@ -10,15 +8,11 @@
 ![ci](https://github.com/Xmaster6y/xdrl/actions/workflows/ci.yml/badge.svg)
 ![publish](https://github.com/Xmaster6y/xdrl/actions/workflows/publish.yml/badge.svg)
 
-<a href="https://xdrl.readthedocs.io"><img src="https://img.shields.io/badge/-Read%20the%20Docs%20Here-blue?style=for-the-badge&logo=Read-the-Docs&logoColor=white"></img></a>
+Explainability for deep RL based on [TorchRL](https://github.com/pytorch/rl).
 
-Explainability for deep RL.
-
-</div>
-<div style="flex-shrink: 0;">
-<img src="https://raw.githubusercontent.com/Xmaster6y/xdrl/refs/heads/main/docs/source/_static/images/xdrl-logo.png" alt="logo" width="200"/>
-</div>
-</div>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Xmaster6y/xdrl/refs/heads/main/docs/source/_static/images/xdrl-logo.png" alt="logo" width="200"/>
+</p>
 
 ## Python Config
 
