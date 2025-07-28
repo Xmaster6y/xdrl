@@ -21,7 +21,7 @@
     .. grid-item::
         .. div::
 
-          .. image:: _static/images/xdrl-logo.svg
+          .. image:: _static/images/xdrl-logo.png
             :width: 300
             :height: 300
 
