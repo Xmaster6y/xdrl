@@ -7,8 +7,8 @@ Opinionated guide to launch scripts on a cluster that uses Slurm and Conda, e.g.
 Init a git repo on the cluster:
 
 ```bash
-mkdir xrl
-cd xrl
+mkdir xdrl
+cd xdrl
 git init
 ```
 

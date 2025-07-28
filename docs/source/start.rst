@@ -1,7 +1,7 @@
 Getting Started
 ===============
 
-**xrl** is a package for explaining the decisions of RL agents.
+**xdrl** is a package for explaining the decisions of RL agents.
 It is designed to be easy to use and to work with the most common explainability
 methods.
 
@@ -10,8 +10,8 @@ methods.
 Coming Soon
 ------------
 
-To get started with xrl, install it with ``pip``.
+To get started with xdrl, install it with ``pip``.
 
 .. code-block:: console
 
-   pip install xrl
+   pip install xdrl
