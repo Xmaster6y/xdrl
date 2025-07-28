@@ -32,7 +32,7 @@ fixed_sidebar = True
 # See https://sphinx-themes.org/ for more
 html_theme = "pydata_sphinx_theme"
 html_title = "xdrl"
-html_logo = "_static/images/xdrl-logo.svg"
+html_logo = "_static/images/xdrl-logo.png"
 html_static_path = ["_static"]
 
 html_favicon = "_static/images/favicon.ico"
