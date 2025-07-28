@@ -1,6 +1,6 @@
 import pytest
 
-from xrl.core import explain
+from xdrl.core import explain
 
 
 @pytest.mark.unit

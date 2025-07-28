@@ -1,7 +1,7 @@
 [project]
-name = "xrl"
+name = "xdrl"
 version = "0.1.0"
-description = "Add your description here"
+description = "Explainability for deep RL."
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -19,11 +19,11 @@ classifiers = [
 ]
 
 [project.urls]
-homepage = "https://xrl.readthedocs.io/"
-documentation = "https://xrl.readthedocs.io/"
-source = "https://github.com/Xmaster6y/xrl"
-issues = "https://github.com/Xmaster6y/xrl/issues"
-releasenotes = "https://github.com/Xmaster6y/xrl/releases"
+homepage = "https://xdrl.readthedocs.io/"
+documentation = "https://xdrl.readthedocs.io/"
+source = "https://github.com/Xmaster6y/xdrl"
+issues = "https://github.com/Xmaster6y/xdrl/issues"
+releasenotes = "https://github.com/Xmaster6y/xdrl/releases"
 
 [dependency-groups]
 dev = [
