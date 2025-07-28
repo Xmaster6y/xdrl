@@ -8,7 +8,7 @@
 ![ci](https://github.com/Xmaster6y/xdrl/actions/workflows/ci.yml/badge.svg)
 ![publish](https://github.com/Xmaster6y/xdrl/actions/workflows/publish.yml/badge.svg)
 
-Explainability for deep RL.
+Explainability for deep RL based on [TorchRL](https://github.com/pytorch/rl).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Xmaster6y/xdrl/refs/heads/main/docs/source/_static/images/xdrl-logo.png" alt="logo" width="200"/>
