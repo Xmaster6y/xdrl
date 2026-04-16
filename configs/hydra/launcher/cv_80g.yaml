@@ -1,0 +1,7 @@
+defaults:
+  - cv_base
+
+cpus_per_task: 14
+additional_parameters:
+  gpus_per_node: a100_7g.80gb:1
+  mem: 200G

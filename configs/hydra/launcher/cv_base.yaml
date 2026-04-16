@@ -1,0 +1,9 @@
+defaults:
+  - submitit_slurm
+
+additional_parameters:
+  error: "results/slurm/%x-%j.err"
+  hint: nomultithread
+  mail_type: FAIL
+  output: "results/slurm/%x-%j.out"
+  time: "10:00:00"

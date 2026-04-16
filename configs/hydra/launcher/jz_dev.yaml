@@ -1,0 +1,7 @@
+defaults:
+  - jz_base
+
+cpus_per_task: 10
+qos: qos_gpu-dev
+additional_parameters:
+  time: "2:00:00"

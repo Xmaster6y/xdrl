@@ -1,0 +1,14 @@
+defaults:
+  - submitit_slurm
+
+cpus_per_task: 10
+gres: gpu:1
+partition: gpu_p13
+qos: qos_gpu-t3
+additional_parameters:
+  account: ${oc.env:IDRPROJ}@v100
+  error: "results/slurm/%x-%j.err"
+  hint: nomultithread
+  mail_type: FAIL
+  output: "results/slurm/%x-%j.out"
+  time: "20:00:00"
