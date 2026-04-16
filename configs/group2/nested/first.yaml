@@ -1,3 +1,0 @@
-defaults:
-  - nested/second
-  - _self_

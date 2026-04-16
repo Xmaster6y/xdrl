@@ -8,23 +8,19 @@
 ![ci](https://github.com/Xmaster6y/xdrl/actions/workflows/ci.yml/badge.svg)
 ![publish](https://github.com/Xmaster6y/xdrl/actions/workflows/publish.yml/badge.svg)
 
-Explainability for deep RL based on [TorchRL](https://github.com/pytorch/rl).
+Interpretability for deep RL with `tdhook` for [TorchRL](https://github.com/pytorch/rl).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Xmaster6y/xdrl/refs/heads/main/docs/source/_static/images/xdrl-logo.png" alt="logo" width="200"/>
 </p>
 
-## Python Config
+## Getting Started
 
-Using `uv` to manage python dependencies and run scripts.
+TBD
 
-## Scripts
+## Config
 
-This project uses [Just](https://github.com/casey/just) to manage scripts, refer to their instructions for installation.
+This project uses [`uv`](https://docs.astral.sh/uv/) to manage python dependencies and run scripts, as well as [`just`](https://github.com/casey/just) to run commands.
 
-## Cluster Config
-
-This project is cluster-ready.
-
-- See [`launch`](./launch/) to launch scripts with slurm.
-- See [`notebooks`](./notebooks/) to run notebooks on a cluster's JupyterHub.
+## License
+`xdrl` is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
