@@ -1,0 +1,56 @@
+algo: ippo
+seed: 0
+
+env:
+  scenario: balance
+  continuous_actions: true
+  num_envs: 60
+  max_steps: 100
+  device: cpu
+  scenario_kwargs:
+    n_agents: 3
+
+collector:
+  frames_per_batch: 6000
+  total_frames: 1200000
+  compile_policy: false
+  cudagraph_policy: false
+  compile_mode: reduce-overhead
+  compile_warmup: 1
+  cudagraph_warmup: 20
+  no_cuda_sync: false
+
+model:
+  group: agents
+  hidden_dim: 256
+  depth: 2
+  share_policy_params: true
+  share_critic_params: true
+
+loss:
+  clip_epsilon: 0.2
+  entropy_coef: 0.001
+  gamma: 0.99
+  lmbda: 0.95
+
+optim:
+  lr: 0.0003
+  clip_grad_norm: true
+  max_grad_norm: 1.0
+
+train:
+  device: cpu
+  storing_device: cpu
+  frame_skip: 1
+  num_epochs: 10
+  minibatch_size: 400
+  optim_steps_per_batch: 15
+  progress_bar: true
+  save_trainer_interval: 10000
+  log_interval: 10000
+
+logger:
+  backend: wandb
+  log_dir: logs
+  experiment_name: vmas_ppo
+  wandb_project: xdrl
