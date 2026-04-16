@@ -1,6 +1,0 @@
-defaults:
-  - basic
-
-max_batch_size: null
-params:
-  env.scenario: choice(balance, navigation, dispersion)
