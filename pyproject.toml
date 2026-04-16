@@ -8,7 +8,10 @@ authors = [
     {name = "Yoann Poupart", email = "yoann.poupart@ens-lyon.org"},
 ]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "tdhook",
+    "torchrl>=0.11.1",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -62,6 +65,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.uv]
 default-groups = ["dev"]
+
+[tool.uv.sources]
+tdhook = { git = "https://github.com/Xmaster6y/tdhook" }
 
 [tool.ruff]
 line-length = 119
