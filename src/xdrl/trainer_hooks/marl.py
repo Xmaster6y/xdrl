@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 from tensordict import TensorDictBase
-
 from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value.advantages import GAE
+from torchrl.trainers.trainers import TrainerHookBase
 
 
 def ensure_group_next_keys(batch: TensorDictBase, group: str = "agents") -> None:
@@ -18,14 +20,16 @@ def ensure_group_next_keys(batch: TensorDictBase, group: str = "agents") -> None
     elif ("next", "reward") in keys:
         root_reward = batch.get(("next", "reward"))
         if group not in batch.keys():
-            raise RuntimeError("Cannot infer number of agents for reward broadcast.")
+            msg = "Cannot infer number of agents for reward broadcast."
+            raise RuntimeError(msg)
         n_agents = batch.get(group).shape[-1]
         batch.set(
             group_reward_key,
             root_reward.unsqueeze(-2).expand(*root_reward.shape[:-1], n_agents, 1),
         )
     else:
-        raise RuntimeError("Batch has neither ('next','agents','reward') nor ('next','reward').")
+        msg = "Batch has neither ('next','agents','reward') nor ('next','reward')."
+        raise RuntimeError(msg)
 
     if ("next", group, "done") not in keys and ("next", "done") in keys:
         root_done = batch.get(("next", "done"))
@@ -42,8 +46,8 @@ def ensure_group_next_keys(batch: TensorDictBase, group: str = "agents") -> None
         )
 
 
-class MultiAgentGAEHook:
-    """Pre-epoch hook that adapts VMAS batch keys and computes GAE."""
+class MultiAgentGAEHook(TrainerHookBase):
+    """Pre-epoch hook that adapts MARL batch keys and computes GAE."""
 
     def __init__(self, loss_module: ClipPPOLoss, gamma: float, lmbda: float, group: str = "agents") -> None:
         self.loss_module = loss_module
@@ -73,10 +77,32 @@ class MultiAgentGAEHook:
             )
         return batch
 
+    def register(self, trainer: Any, name: str = "multiagent_gae") -> None:
+        trainer.register_op("pre_epoch", self)
+        trainer.register_module(name, self)
 
-def reduce_loss_tensors(_sub_batch: TensorDictBase, losses_td: TensorDictBase) -> TensorDictBase:
-    """Reduce non-scalar loss stats to scalars for logger compatibility."""
-    for key, value in losses_td.items():
-        if isinstance(value, torch.Tensor) and value.numel() > 1:
-            losses_td.set(key, value.mean())
-    return losses_td
+    def state_dict(self) -> dict[str, Any]:
+        return {"group": self.group}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.group = state_dict.get("group", self.group)
+
+
+class ReduceLossTensorsHook(TrainerHookBase):
+    """Reduce non-scalar loss statistics to scalars for logging."""
+
+    def __call__(self, _sub_batch: TensorDictBase, losses_td: TensorDictBase) -> TensorDictBase:
+        for key, value in losses_td.items():
+            if isinstance(value, torch.Tensor) and value.numel() > 1:
+                losses_td.set(key, value.mean())
+        return losses_td
+
+    def register(self, trainer: Any, name: str = "reduce_loss_tensors") -> None:
+        trainer.register_op("process_loss", self)
+        trainer.register_module(name, self)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        return None

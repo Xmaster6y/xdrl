@@ -1,0 +1,32 @@
+seed: 0
+
+env:
+  id: CartPole-v1
+  num_envs: 8
+  device: cpu
+
+collector:
+  frames_per_batch: 1024
+  total_frames: 200000
+
+model:
+  hidden_dim: 256
+  depth: 2
+
+loss:
+  gamma: 0.99
+
+optim:
+  lr: 0.0003
+
+train:
+  device: cpu
+  batch_size: 256
+  target_update_interval: 500
+  progress_bar: true
+
+logger:
+  backend: wandb
+  log_dir: logs
+  experiment_name: gymnasium_dqn
+  wandb_project: xdrl

@@ -1,8 +1,9 @@
 import pytest
 import torch
 from tensordict import TensorDict
+from torchrl.trainers.trainers import TrainerHookBase
 
-from xdrl.training import ensure_group_next_keys, reduce_loss_tensors
+from xdrl.trainer_hooks import MultiAgentGAEHook, ReduceLossTensorsHook, ensure_group_next_keys
 
 
 def test_ensure_group_next_keys_broadcasts_shared_signals():
@@ -45,8 +46,14 @@ def test_reduce_loss_tensors_reduces_non_scalars():
         batch_size=[],
     )
 
-    reduce_loss_tensors(losses, losses)
+    hook = ReduceLossTensorsHook()
+    hook(losses, losses)
 
     assert losses.get("loss_objective").shape == torch.Size([])
     assert losses.get("explained_variance").shape == torch.Size([])
     assert losses.get("explained_variance").item() == pytest.approx(1.0)
+
+
+def test_marl_hooks_inherit_trainer_hook_base():
+    assert issubclass(MultiAgentGAEHook, TrainerHookBase)
+    assert issubclass(ReduceLossTensorsHook, TrainerHookBase)

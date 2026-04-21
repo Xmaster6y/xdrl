@@ -30,7 +30,7 @@ from torchrl.record.loggers import get_logger
 from torchrl.trainers.algorithms.ppo import PPOTrainer
 from torchrl.trainers.trainers import BatchSubSampler, LogScalar
 
-from xdrl.training import MultiAgentGAEHook, reduce_loss_tensors
+from xdrl.trainer_hooks import MultiAgentGAEHook, ReduceLossTensorsHook
 
 
 def make_env(cfg: DictConfig) -> TransformedEnv:
@@ -275,7 +275,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> PPOTrainer:
             group=group,
         ),
     )
-    trainer.register_op(dest="process_loss", op=reduce_loss_tensors)
+    trainer.register_op(dest="process_loss", op=ReduceLossTensorsHook())
     trainer.register_op(dest="process_optim_batch", op=BatchSubSampler(batch_size=cfg.train.minibatch_size))
 
     trainer.register_op(

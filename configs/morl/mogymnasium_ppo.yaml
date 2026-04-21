@@ -1,0 +1,36 @@
+seed: 0
+
+env:
+  id: mo-lunar-lander-continuous-v2
+  num_envs: 8
+  device: cpu
+
+collector:
+  frames_per_batch: 2048
+  total_frames: 200000
+
+model:
+  hidden_dim: 256
+  depth: 2
+
+loss:
+  gamma: 0.99
+  lmbda: 0.95
+  clip_epsilon: 0.2
+  entropy_coef: 0.0
+
+optim:
+  lr: 0.0003
+
+train:
+  device: cpu
+  num_epochs: 10
+  minibatch_size: 256
+  optim_steps_per_batch: 8
+  progress_bar: true
+
+logger:
+  backend: wandb
+  log_dir: logs
+  experiment_name: mogymnasium_ppo
+  wandb_project: xdrl
