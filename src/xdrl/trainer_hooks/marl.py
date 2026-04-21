@@ -21,6 +21,10 @@ class MultiAgentGAEHook(TrainerHookBase):
             value_network=self.loss_module.critic_network,
             average_gae=True,
         )
+        self._set_gae_keys()
+
+    def _set_gae_keys(self) -> None:
+        group = self.group
         self.gae.set_keys(
             reward=(group, "reward"),
             done=(group, "done"),
@@ -60,6 +64,7 @@ class MultiAgentGAEHook(TrainerHookBase):
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self.group = state_dict.get("group", self.group)
+        self._set_gae_keys()
 
 
 class ReduceLossTensorsHook(TrainerHookBase):

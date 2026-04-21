@@ -169,7 +169,7 @@ def _run_training_loop(
         next_obs, reward, terminated, truncated, _info = step_out
         done = bool(terminated or truncated)
 
-        replay_buffer.append((obs, action, reward, next_obs, float(done)))
+        replay_buffer.append((obs, action, reward, next_obs, float(terminated)))
 
         obs = next_obs
         episode_reward += float(reward)
@@ -193,18 +193,18 @@ def _run_training_loop(
         should_learn = step >= cfg.train.learning_starts and len(replay_buffer) >= cfg.train.batch_size
         if should_learn:
             transitions = random.sample(replay_buffer, cfg.train.batch_size)
-            batch_obs, batch_actions, batch_rewards, batch_next_obs, batch_dones = zip(*transitions, strict=True)
+            batch_obs, batch_actions, batch_rewards, batch_next_obs, batch_terminated = zip(*transitions, strict=True)
 
             obs_batch = torch.as_tensor(np.array(batch_obs), dtype=torch.float32, device=device)
             actions_batch = torch.as_tensor(batch_actions, dtype=torch.long, device=device).unsqueeze(-1)
             rewards_batch = torch.as_tensor(batch_rewards, dtype=torch.float32, device=device)
             next_obs_batch = torch.as_tensor(np.array(batch_next_obs), dtype=torch.float32, device=device)
-            dones_batch = torch.as_tensor(batch_dones, dtype=torch.float32, device=device)
+            terminated_batch = torch.as_tensor(batch_terminated, dtype=torch.float32, device=device)
 
             q_values = q_net(obs_batch).gather(1, actions_batch).squeeze(-1)
             with torch.no_grad():
                 next_q_values = target_q_net(next_obs_batch).max(dim=1).values
-                targets = rewards_batch + cfg.loss.gamma * (1.0 - dones_batch) * next_q_values
+                targets = rewards_batch + cfg.loss.gamma * (1.0 - terminated_batch) * next_q_values
 
             loss = torch.nn.functional.mse_loss(q_values, targets)
             optimizer.zero_grad()

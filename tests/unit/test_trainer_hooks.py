@@ -79,6 +79,23 @@ def test_multi_agent_gae_hook_raises_when_only_shared_next_keys():
         hook(batch)
 
 
+def test_multi_agent_gae_hook_load_state_updates_gae_keys():
+    hook = _multi_agent_gae_hook()
+    hook.gae = MagicMock()
+
+    hook.load_state_dict({"group": "players"})
+
+    assert hook.group == "players"
+    hook.gae.set_keys.assert_called_once_with(
+        reward=("players", "reward"),
+        done=("players", "done"),
+        terminated=("players", "terminated"),
+        advantage=("players", "advantage"),
+        value_target=("players", "value_target"),
+        value=("players", "state_value"),
+    )
+
+
 def test_reduce_loss_tensors_reduces_non_scalars():
     losses = TensorDict(
         {

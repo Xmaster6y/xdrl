@@ -2,11 +2,8 @@ seed: 0
 
 env:
   id: CartPole-v1
-  num_envs: 1
-  device: cpu
 
 collector:
-  frames_per_batch: 1000
   total_frames: 50000
 
 model:
@@ -31,7 +28,6 @@ train:
   reward_window: 20
   log_interval: 1000
   log_episodes: false
-  progress_bar: true
 
 logger:
   backend: wandb
