@@ -30,7 +30,7 @@ from torchrl.record.loggers import get_logger
 from torchrl.trainers.algorithms.ppo import PPOTrainer
 from torchrl.trainers.trainers import BatchSubSampler, LogScalar
 
-from xdrl.trainer_hooks import MultiAgentGAEHook, ReduceLossTensorsHook
+from xdrl.trainer_hooks import MultiAgentGAEHook, PolicyCheckpointHook, ReduceLossTensorsHook
 
 
 def make_env(cfg: DictConfig) -> TransformedEnv:
@@ -277,6 +277,27 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> PPOTrainer:
     )
     trainer.register_op(dest="process_loss", op=ReduceLossTensorsHook())
     trainer.register_op(dest="process_optim_batch", op=BatchSubSampler(batch_size=cfg.train.minibatch_size))
+
+    policy_checkpoint_interval = int(cfg.train.get("policy_checkpoint_interval", 0))
+    if policy_checkpoint_interval > 0:
+        checkpoint_dir = cfg.train.get("policy_checkpoint_dir", "checkpoints/policy")
+        checkpoint_prefix = cfg.train.get("policy_checkpoint_prefix", "policy")
+        trainer.register_op(
+            dest="post_steps",
+            op=PolicyCheckpointHook(
+                policy=actor,
+                directory=checkpoint_dir,
+                interval=policy_checkpoint_interval,
+                prefix=checkpoint_prefix,
+                meta={"algo": cfg.algo, "group": group},
+            ),
+        )
+        pylogger.info(
+            "Policy checkpointing enabled interval={} dir='{}' prefix='{}'",
+            policy_checkpoint_interval,
+            checkpoint_dir,
+            checkpoint_prefix,
+        )
 
     trainer.register_op(
         dest="pre_steps_log",

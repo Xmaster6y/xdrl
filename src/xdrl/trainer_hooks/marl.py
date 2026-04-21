@@ -9,45 +9,8 @@ from torchrl.objectives.value.advantages import GAE
 from torchrl.trainers.trainers import TrainerHookBase
 
 
-def ensure_group_next_keys(batch: TensorDictBase, group: str = "agents") -> None:
-    """Broadcast shared next keys to per-agent keys when needed."""
-    keys = set(batch.keys(True, True))
-
-    group_reward_key = ("next", group, "reward")
-    if group_reward_key in keys:
-        reward = batch.get(group_reward_key)
-        n_agents = reward.shape[-2]
-    elif ("next", "reward") in keys:
-        root_reward = batch.get(("next", "reward"))
-        if group not in batch.keys():
-            msg = "Cannot infer number of agents for reward broadcast."
-            raise RuntimeError(msg)
-        n_agents = batch.get(group).shape[-1]
-        batch.set(
-            group_reward_key,
-            root_reward.unsqueeze(-2).expand(*root_reward.shape[:-1], n_agents, 1),
-        )
-    else:
-        msg = "Batch has neither ('next','agents','reward') nor ('next','reward')."
-        raise RuntimeError(msg)
-
-    if ("next", group, "done") not in keys and ("next", "done") in keys:
-        root_done = batch.get(("next", "done"))
-        batch.set(
-            ("next", group, "done"),
-            root_done.unsqueeze(-2).expand(*root_done.shape[:-1], n_agents, 1),
-        )
-
-    if ("next", group, "terminated") not in keys and ("next", "terminated") in keys:
-        root_terminated = batch.get(("next", "terminated"))
-        batch.set(
-            ("next", group, "terminated"),
-            root_terminated.unsqueeze(-2).expand(*root_terminated.shape[:-1], n_agents, 1),
-        )
-
-
 class MultiAgentGAEHook(TrainerHookBase):
-    """Pre-epoch hook that adapts MARL batch keys and computes GAE."""
+    """Pre-epoch hook that computes GAE for MARL batches with per-group ``next`` keys."""
 
     def __init__(self, loss_module: ClipPPOLoss, gamma: float, lmbda: float, group: str = "agents") -> None:
         self.loss_module = loss_module
@@ -68,7 +31,18 @@ class MultiAgentGAEHook(TrainerHookBase):
         )
 
     def __call__(self, batch: TensorDictBase) -> TensorDictBase:
-        ensure_group_next_keys(batch, self.group)
+        group = self.group
+        keys = set(batch.keys(True, True))
+        required = (
+            ("next", group, "reward"),
+            ("next", group, "done"),
+            ("next", group, "terminated"),
+        )
+        missing = [k for k in required if k not in keys]
+        if missing:
+            missing_str = ", ".join(str(k) for k in missing)
+            msg = f"MARL batch must define per-group keys under `next` for group {group!r}; missing: {missing_str}"
+            raise RuntimeError(msg)
         with torch.no_grad():
             self.gae(
                 batch,
