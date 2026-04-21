@@ -13,11 +13,6 @@ env:
 collector:
   frames_per_batch: 6000
   total_frames: 1200000
-  compile_policy: false
-  cudagraph_policy: false
-  compile_mode: reduce-overhead
-  compile_warmup: 1
-  cudagraph_warmup: 20
   no_cuda_sync: false
 
 model:

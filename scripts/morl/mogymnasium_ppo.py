@@ -166,57 +166,11 @@ def make_modules(env: GymEnv | SerialEnv, cfg: DictConfig) -> tuple[Probabilisti
     return actor, critic
 
 
-def resolve_collector_acceleration(
-    cfg: DictConfig,
-) -> tuple[bool | dict[str, int | str], bool | dict[str, int], str]:
-    compile_requested = bool(cfg.collector.get("compile_policy", False))
-    cudagraph_requested = bool(cfg.collector.get("cudagraph_policy", False))
-
-    policy_device = torch.device(cfg.train.device)
-    cuda_ready = policy_device.type == "cuda" and torch.cuda.is_available()
-
-    if cudagraph_requested and not cuda_ready:
-        pylogger.warning(
-            "Disabling collector cudagraph_policy because policy device is '{}' and CUDA available is {}.",
-            policy_device,
-            torch.cuda.is_available(),
-        )
-        cudagraph_requested = False
-
-    compile_policy: bool | dict[str, int | str] = False
-    if compile_requested:
-        compile_policy = {
-            "warmup": int(cfg.collector.get("compile_warmup", 1)),
-        }
-        compile_mode = cfg.collector.get("compile_mode", None)
-        if compile_mode is not None:
-            compile_policy["mode"] = compile_mode
-
-    cudagraph_policy: bool | dict[str, int] = False
-    if cudagraph_requested:
-        cudagraph_policy = {
-            "warmup": int(cfg.collector.get("cudagraph_warmup", 20)),
-        }
-
-    if compile_requested and cudagraph_requested:
-        mode = "compile+cudagraph"
-    elif cudagraph_requested:
-        mode = "cudagraph"
-    elif compile_requested:
-        mode = "compile"
-    else:
-        mode = "eager"
-
-    return compile_policy, cudagraph_policy, mode
-
-
 def make_trainer(cfg: DictConfig, env: GymEnv | SerialEnv) -> PPOTrainer:
     actor, critic = make_modules(env, cfg)
-    compile_policy, cudagraph_policy, collector_mode = resolve_collector_acceleration(cfg)
 
     pylogger.info(
-        "Collector mode={} policy_device={} env_device={} storing_device={}",
-        collector_mode,
+        "Collector policy_device={} env_device={} storing_device={}",
         cfg.train.device,
         cfg.env.device,
         cfg.train.storing_device,
@@ -230,9 +184,7 @@ def make_trainer(cfg: DictConfig, env: GymEnv | SerialEnv) -> PPOTrainer:
         storing_device=cfg.train.storing_device,
         frames_per_batch=cfg.collector.frames_per_batch,
         total_frames=cfg.collector.total_frames,
-        compile_policy=compile_policy,
-        cudagraph_policy=cudagraph_policy,
-        no_cuda_sync=bool(cfg.collector.get("no_cuda_sync", False)),
+        no_cuda_sync=cfg.collector.no_cuda_sync,
     )
 
     loss_module = ClipPPOLoss(
