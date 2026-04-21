@@ -67,6 +67,43 @@ class MultiAgentGAEHook(TrainerHookBase):
         self._set_gae_keys()
 
 
+class ExpandSharedNextKeysHook(TrainerHookBase):
+    """Expand shared ``next`` keys to per-group keys for MARL batches."""
+
+    def __init__(self, group: str = "agents", key_names: tuple[str, ...] = ("done", "terminated")) -> None:
+        self.group = group
+        self.key_names = key_names
+
+    def __call__(self, batch: TensorDictBase) -> TensorDictBase:
+        group = self.group
+        if group not in batch.keys():
+            return batch
+
+        group_shape = batch.get(group).shape
+        keys = set(batch.keys(True, True))
+        for key_name in self.key_names:
+            nested_key = ("next", group, key_name)
+            shared_key = ("next", key_name)
+            if nested_key in keys or shared_key not in keys:
+                continue
+            batch.set(
+                nested_key,
+                batch.get(shared_key).unsqueeze(-1).expand((*group_shape, 1)),
+            )
+        return batch
+
+    def register(self, trainer: Any, name: str = "expand_shared_next_keys") -> None:
+        trainer.register_op("pre_epoch", self)
+        trainer.register_module(name, self)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"group": self.group, "key_names": self.key_names}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.group = state_dict.get("group", self.group)
+        self.key_names = tuple(state_dict.get("key_names", self.key_names))
+
+
 class ReduceLossTensorsHook(TrainerHookBase):
     """Reduce non-scalar loss statistics to scalars for logging."""
 

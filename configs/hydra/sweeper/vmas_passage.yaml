@@ -1,0 +1,8 @@
+defaults:
+  - basic
+
+max_batch_size: null
+params:
+  env.scenario: choice(passage)
+  env.max_steps: choice(500)
+  eval.max_steps: choice(500)

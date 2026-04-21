@@ -1,38 +1,32 @@
 algo: ippo
 seed: 0
-
 env:
-  scenario: balance
+  scenario: passage
   continuous_actions: true
   num_envs: 60
-  max_steps: 100
+  max_steps: 500
   device: cpu
   scenario_kwargs:
     n_agents: 3
-
 collector:
   frames_per_batch: 6000
   total_frames: 1200000
   no_cuda_sync: false
-
 model:
   group: agents
   hidden_dim: 256
   depth: 2
   share_policy_params: true
   share_critic_params: true
-
 loss:
   clip_epsilon: 0.2
   entropy_coef: 0.001
   gamma: 0.99
   lmbda: 0.95
-
 optim:
   lr: 0.0003
   clip_grad_norm: true
   max_grad_norm: 1.0
-
 train:
   device: cpu
   storing_device: cpu
@@ -46,7 +40,15 @@ train:
   policy_checkpoint_interval: 0
   policy_checkpoint_dir: checkpoints/policy
   policy_checkpoint_prefix: policy
-
+eval:
+  enabled: true
+  pre_eval: true
+  interval_frames: 12000
+  episodes: 4
+  max_steps: 500
+  deterministic: true
+  render: true
+  video_fps: 20
 logger:
   backend: wandb
   log_dir: logs

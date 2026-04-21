@@ -1,0 +1,6 @@
+defaults:
+  - basic
+
+max_batch_size: null
+params:
+  env.scenario: choice(navigation, dispersion, discovery, passage, sampling)

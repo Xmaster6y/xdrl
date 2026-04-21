@@ -3,9 +3,9 @@
 Examples:
 
 ```bash
-uv run -m scripts.marl.vmas_ppo
-uv run -m scripts.marl.vmas_ppo algo=mappo
-uv run -m scripts.marl.vmas_ppo env.scenario=navigation
+uv run -m scripts.vmas_ppo
+uv run -m scripts.vmas_ppo algo=mappo
+uv run -m scripts.vmas_ppo env.scenario=navigation
 ```
 """
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 import hydra
 import torch
 from loguru import logger as pylogger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from tensordict.nn import TensorDictModule
 from tensordict.nn.distributions import NormalParamExtractor
 from torch import nn
@@ -28,9 +28,15 @@ from torchrl.modules.models.multiagent import MultiAgentMLP
 from torchrl.objectives import ClipPPOLoss, ValueEstimators
 from torchrl.record.loggers import get_logger
 from torchrl.trainers.algorithms.ppo import PPOTrainer
-from torchrl.trainers.trainers import BatchSubSampler, LogScalar
+from torchrl.trainers.trainers import BatchSubSampler
 
-from xdrl.trainer_hooks import MultiAgentGAEHook, PolicyCheckpointHook, ReduceLossTensorsHook
+from xdrl.trainer_hooks import (
+    ExpandSharedNextKeysHook,
+    LoggingEvaluationMetricsHook,
+    LoggingHookSet,
+    MultiAgentGAEHook,
+    PolicyCheckpointHook,
+)
 
 
 def make_env(cfg: DictConfig) -> TransformedEnv:
@@ -39,6 +45,22 @@ def make_env(cfg: DictConfig) -> TransformedEnv:
         num_envs=cfg.env.num_envs,
         continuous_actions=cfg.env.continuous_actions,
         max_steps=cfg.env.max_steps,
+        device=cfg.env.device,
+        seed=cfg.seed,
+        **cfg.env.scenario_kwargs,
+    )
+    return TransformedEnv(
+        base_env,
+        RewardSum(in_keys=[base_env.reward_key], out_keys=[("agents", "episode_reward")]),
+    )
+
+
+def make_eval_env(cfg: DictConfig) -> TransformedEnv:
+    base_env = VmasEnv(
+        scenario=cfg.env.scenario,
+        num_envs=cfg.eval.episodes,
+        continuous_actions=cfg.env.continuous_actions,
+        max_steps=cfg.eval.max_steps,
         device=cfg.env.device,
         seed=cfg.seed,
         **cfg.env.scenario_kwargs,
@@ -134,7 +156,7 @@ def make_modules(env: TransformedEnv, cfg: DictConfig) -> tuple[ProbabilisticAct
     return actor, critic
 
 
-def make_trainer(cfg: DictConfig, env: TransformedEnv) -> PPOTrainer:
+def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, LoggingHookSet]:
     actor, critic = make_modules(env, cfg)
 
     pylogger.info(
@@ -191,6 +213,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> PPOTrainer:
         experiment_name=cfg.logger.experiment_name,
         wandb_kwargs={"project": cfg.logger.wandb_project},
     )
+    trainer_logger.log_hparams(OmegaConf.to_container(cfg, resolve=True))
 
     trainer = PPOTrainer(
         collector=collector,
@@ -214,6 +237,13 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> PPOTrainer:
 
     trainer.register_op(
         dest="pre_epoch",
+        op=ExpandSharedNextKeysHook(
+            group=group,
+            key_names=("done", "terminated"),
+        ),
+    )
+    trainer.register_op(
+        dest="pre_epoch",
         op=MultiAgentGAEHook(
             loss_module=loss_module,
             gamma=cfg.loss.gamma,
@@ -221,7 +251,6 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> PPOTrainer:
             group=group,
         ),
     )
-    trainer.register_op(dest="process_loss", op=ReduceLossTensorsHook())
     trainer.register_op(dest="process_optim_batch", op=BatchSubSampler(batch_size=cfg.train.minibatch_size))
 
     policy_checkpoint_interval = int(cfg.train.get("policy_checkpoint_interval", 0))
@@ -245,41 +274,37 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> PPOTrainer:
             checkpoint_prefix,
         )
 
-    trainer.register_op(
-        dest="pre_steps_log",
-        op=LogScalar(
-            key=("next", group, "reward"),
-            logname="reward",
-            log_pbar=True,
-            include_std=True,
-            reduction="mean",
-        ),
-    )
-    trainer.register_op(
-        dest="pre_steps_log",
-        op=LogScalar(
-            key=("next", "done"),
-            logname="done_rate",
-            log_pbar=False,
-            include_std=False,
-            reduction="mean",
-        ),
-    )
-    trainer.register_op(
-        dest="pre_steps_log",
-        op=LogScalar(
-            key=("next", group, "episode_reward"),
-            logname="episode_reward",
-            log_pbar=False,
-            include_std=True,
-            reduction="mean",
-        ),
-    )
+    eval_hook = None
+    if cfg.eval.enabled:
+        pylogger.info(
+            "Evaluation enabled: pre_eval={} interval_frames={} episodes={} render={}",
+            cfg.eval.pre_eval,
+            cfg.eval.interval_frames,
+            cfg.eval.episodes,
+            cfg.eval.render,
+        )
+        eval_hook = LoggingEvaluationMetricsHook(
+            policy=actor,
+            environment=make_eval_env(cfg),
+            group=group,
+            interval_frames=cfg.eval.interval_frames,
+            max_steps=cfg.eval.max_steps,
+            deterministic=cfg.eval.deterministic,
+            render=cfg.eval.render,
+            video_fps=cfg.eval.video_fps,
+        )
 
-    return trainer
+    logging_hooks = LoggingHookSet(
+        group=group,
+        frame_skip=cfg.train.frame_skip,
+        eval_hook=eval_hook,
+    )
+    logging_hooks.register(trainer)
+
+    return trainer, logging_hooks
 
 
-@hydra.main(config_path="../../configs/marl", config_name="vmas_ppo", version_base=None)
+@hydra.main(config_path="../configs", config_name="vmas_ppo", version_base=None)
 def main(cfg: DictConfig) -> None:
     torch.manual_seed(cfg.seed)
 
@@ -292,10 +317,14 @@ def main(cfg: DictConfig) -> None:
     )
 
     env = make_env(cfg)
-    trainer = make_trainer(cfg, env)
+    trainer, logging_hooks = make_trainer(cfg, env)
     try:
+        if cfg.eval.enabled and cfg.eval.pre_eval:
+            pylogger.info("Running pre-training evaluation")
+            logging_hooks.run_pre_eval()
         trainer.train()
     finally:
+        logging_hooks.close()
         trainer.collector.shutdown()
         if not env.is_closed:
             env.close()

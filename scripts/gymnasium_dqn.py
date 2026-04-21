@@ -3,9 +3,9 @@
 Examples:
 
 ```bash
-uv run -m scripts.sarl.gymnasium_dqn
-uv run -m scripts.sarl.gymnasium_dqn env.id=Acrobot-v1
-uv run -m scripts.sarl.gymnasium_dqn collector.total_frames=10000
+uv run -m scripts.gymnasium_dqn
+uv run -m scripts.gymnasium_dqn env.id=Acrobot-v1
+uv run -m scripts.gymnasium_dqn collector.total_frames=10000
 ```
 """
 
@@ -43,7 +43,7 @@ def make_env(cfg: DictConfig):
     try:
         import gymnasium as gym
     except ImportError as exc:
-        msg = "gymnasium is required to run scripts.sarl.gymnasium_dqn"
+        msg = "gymnasium is required to run scripts.gymnasium_dqn"
         raise RuntimeError(msg) from exc
 
     pylogger.info("Preparing SARL env '{}'", cfg.env.id)
@@ -243,7 +243,7 @@ def _run_training_loop(
     )
 
 
-@hydra.main(config_path="../../configs/sarl", config_name="gymnasium_dqn", version_base=None)
+@hydra.main(config_path="../configs", config_name="gymnasium_dqn", version_base=None)
 def main(cfg: DictConfig) -> None:
     pylogger.info("Starting SARL DQN for env {}", cfg.env.id)
     train(cfg)

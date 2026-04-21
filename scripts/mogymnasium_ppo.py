@@ -3,8 +3,8 @@
 Examples:
 
 ```bash
-uv run -m scripts.morl.mogymnasium_ppo
-uv run -m scripts.morl.mogymnasium_ppo env.id=mo-mountaincarcontinuous-v0
+uv run -m scripts.mogymnasium_ppo
+uv run -m scripts.mogymnasium_ppo env.id=mo-mountaincarcontinuous-v0
 ```
 """
 
@@ -287,7 +287,7 @@ def make_trainer(cfg: DictConfig, env: GymEnv | SerialEnv) -> PPOTrainer:
     return trainer
 
 
-@hydra.main(config_path="../../configs/morl", config_name="mogymnasium_ppo", version_base=None)
+@hydra.main(config_path="../configs", config_name="mogymnasium_ppo", version_base=None)
 def main(cfg: DictConfig) -> None:
     torch.manual_seed(cfg.seed)
     pylogger.info(
