@@ -3,9 +3,9 @@
 Examples:
 
 ```bash
-uv run scripts/vmas_ppo.py
-uv run scripts/vmas_ppo.py algo=mappo
-uv run scripts/vmas_ppo.py env.scenario=navigation
+uv run -m scripts.marl.vmas_ppo
+uv run -m scripts.marl.vmas_ppo algo=mappo
+uv run -m scripts.marl.vmas_ppo env.scenario=navigation
 ```
 """
 
@@ -312,7 +312,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> PPOTrainer:
     return trainer
 
 
-@hydra.main(config_path="../configs", config_name="vmas_ppo", version_base=None)
+@hydra.main(config_path="../../configs/marl", config_name="vmas_ppo", version_base=None)
 def main(cfg: DictConfig) -> None:
     torch.manual_seed(cfg.seed)
 
