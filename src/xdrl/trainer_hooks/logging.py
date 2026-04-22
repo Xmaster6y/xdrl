@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-import warnings
 from collections.abc import Sequence
 from typing import Any
 
@@ -304,6 +303,7 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
         deterministic: bool,
         render: bool,
         video_fps: int,
+        render_kwargs: dict[str, Any] | None = None,
         reward_key: tuple[str, ...] | None = None,
         reduce_stats: bool | None = None,
         logger: Any | None = None,
@@ -318,11 +318,33 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
         self.max_steps = max_steps
         self.deterministic = deterministic
         self.render = render
+        self.render_kwargs = dict(render_kwargs) if render_kwargs is not None else None
         self.video_fps = video_fps
         self.logger = logger
         self.trainer: Trainer | None = None
 
-    def _render_frame(self) -> np.ndarray | None:
+    @staticmethod
+    def _to_frame_array(frame: Any) -> np.ndarray:
+        if isinstance(frame, torch.Tensor):
+            frame = frame.detach().cpu().numpy()
+        if isinstance(frame, np.ndarray):
+            return frame
+        msg = f"Expected render output to be a numpy array or torch tensor, got {type(frame).__name__}."
+        raise RuntimeError(msg)
+
+    def _extract_render_frame(self, output: Any) -> np.ndarray:
+        if output is None:
+            msg = "Render returned None while evaluation rendering is enabled."
+            raise RuntimeError(msg)
+        if isinstance(output, (list, tuple)):
+            for item in output:
+                if isinstance(item, (np.ndarray, torch.Tensor)):
+                    return self._to_frame_array(item)
+            msg = "Render returned a sequence but contained no numpy array or torch tensor frame."
+            raise RuntimeError(msg)
+        return self._to_frame_array(output)
+
+    def _renderable_candidates(self) -> list[Any]:
         candidates = [
             self.environment,
             getattr(self.environment, "base_env", None),
@@ -331,32 +353,18 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
         envs = getattr(self.environment, "envs", None)
         if isinstance(envs, (list, tuple)):
             candidates.extend(envs)
+        return [candidate for candidate in candidates if candidate is not None and hasattr(candidate, "render")]
 
-        for candidate in candidates:
-            if candidate is None or not hasattr(candidate, "render"):
-                continue
+    def _render_frame(self) -> np.ndarray:
+        candidates = self._renderable_candidates()
+        if not candidates:
+            msg = "Evaluation rendering is enabled but no renderable environment candidate was found."
+            raise RuntimeError(msg)
 
-            try:
-                frame = candidate.render()
-            except TypeError:
-                try:
-                    frame = candidate.render(mode="rgb_array")
-                except Exception:
-                    continue
-            except Exception:
-                continue
-
-            if isinstance(frame, torch.Tensor):
-                frame = frame.detach().cpu().numpy()
-            if isinstance(frame, np.ndarray):
-                return frame
-            if isinstance(frame, (list, tuple)):
-                for item in frame:
-                    if isinstance(item, torch.Tensor):
-                        item = item.detach().cpu().numpy()
-                    if isinstance(item, np.ndarray):
-                        return item
-        return None
+        candidate = candidates[0]
+        kwargs = self.render_kwargs or {}
+        output = candidate.render(**kwargs)
+        return self._extract_render_frame(output)
 
     def _evaluate_once(self, step: int) -> dict[str, float]:
         start = time.perf_counter()
@@ -419,11 +427,14 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
         )
 
         target_logger = self.trainer.logger if self.trainer is not None else self.logger
+        if self.render and not video_frames:
+            msg = "Evaluation rendering is enabled but no frames were captured during rollout."
+            raise RuntimeError(msg)
+
         if video_frames and target_logger is not None:
-            frames = [f for f in video_frames if isinstance(f, np.ndarray)]
-            if len(frames) > 1:
+            if len(video_frames) >= 1:
                 video = torch.as_tensor(
-                    np.transpose(np.stack(frames, axis=0), (0, 3, 1, 2)),
+                    np.transpose(np.stack(video_frames, axis=0), (0, 3, 1, 2)),
                     dtype=torch.uint8,
                 ).unsqueeze(0)
                 target_logger.log_video(
@@ -431,11 +442,6 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
                     video,
                     step=step,
                     fps=self.video_fps,
-                )
-            elif self.render:
-                warnings.warn(
-                    "Evaluation rendering is enabled but no valid frames were captured; eval/<subgroup>/video was not logged.",
-                    stacklevel=2,
                 )
 
         return out
@@ -481,6 +487,7 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
             "max_steps": self.max_steps,
             "deterministic": self.deterministic,
             "render": self.render,
+            "render_kwargs": self.render_kwargs,
             "video_fps": self.video_fps,
         }
 
@@ -494,6 +501,8 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
         self.max_steps = int(state_dict.get("max_steps", self.max_steps))
         self.deterministic = bool(state_dict.get("deterministic", self.deterministic))
         self.render = bool(state_dict.get("render", self.render))
+        render_kwargs = state_dict.get("render_kwargs", self.render_kwargs)
+        self.render_kwargs = None if render_kwargs is None else dict(render_kwargs)
         self.video_fps = int(state_dict.get("video_fps", self.video_fps))
 
 
@@ -512,6 +521,7 @@ class LoggingEvaluationHookSet:
         non_deterministic: bool,
         render: bool,
         video_fps: int,
+        render_kwargs: dict[str, Any] | None = None,
         reward_key: tuple[str, ...] | None = None,
         reduce_stats: bool | None = None,
         logger: Any | None = None,
@@ -526,6 +536,7 @@ class LoggingEvaluationHookSet:
             "interval_frames": interval_frames,
             "max_steps": max_steps,
             "render": render,
+            "render_kwargs": render_kwargs,
             "video_fps": video_fps,
             "logger": logger,
         }

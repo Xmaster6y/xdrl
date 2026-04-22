@@ -290,6 +290,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
             deterministic=cfg.eval.deterministic,
             non_deterministic=cfg.eval.non_deterministic,
             render=cfg.eval.render,
+            render_kwargs={"mode": "rgb_array"},
             video_fps=cfg.eval.video_fps,
         )
 
