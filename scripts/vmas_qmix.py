@@ -209,12 +209,22 @@ def main(cfg: DictConfig) -> None:
 
     optimizer = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr)
 
+    wandb_kwargs_cfg = cfg.logger.get("wandb_kwargs")
+    trackio_kwargs_cfg = cfg.logger.get("trackio_kwargs")
     exp_logger = get_logger(
         logger_type=cfg.logger.backend,
         logger_name=cfg.logger.log_dir,
         experiment_name=cfg.logger.experiment_name,
-        wandb_kwargs=OmegaConf.to_container(cfg.logger.get("wandb_kwargs") or {}, resolve=True),
-        trackio_kwargs=OmegaConf.to_container(cfg.logger.get("trackio_kwargs") or {}, resolve=True),
+        wandb_kwargs=(
+            OmegaConf.to_container(wandb_kwargs_cfg, resolve=True)
+            if OmegaConf.is_config(wandb_kwargs_cfg)
+            else (wandb_kwargs_cfg or {})
+        ),
+        trackio_kwargs=(
+            OmegaConf.to_container(trackio_kwargs_cfg, resolve=True)
+            if OmegaConf.is_config(trackio_kwargs_cfg)
+            else (trackio_kwargs_cfg or {})
+        ),
     )
     exp_logger.log_hparams(OmegaConf.to_container(cfg, resolve=True))
 
