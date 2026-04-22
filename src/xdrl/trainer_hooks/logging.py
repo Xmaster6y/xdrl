@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import warnings
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -38,6 +39,49 @@ def _collector_mask(batch: TensorDictBase) -> torch.Tensor | None:
     return batch.get(key).bool()
 
 
+def _scalarize_last_dim(value: torch.Tensor, weights: tuple[float, ...] | None) -> torch.Tensor:
+    if value.ndim == 0:
+        return value
+
+    if value.shape[-1] == 1:
+        return value.squeeze(-1)
+
+    if weights is None:
+        return value.sum(dim=-1)
+
+    if len(weights) != value.shape[-1]:
+        msg = (
+            "episode_reward objective dimension does not match scalarization weights: "
+            f"got {value.shape[-1]} objectives and {len(weights)} weights"
+        )
+        raise ValueError(msg)
+
+    weights_tensor = torch.as_tensor(weights, device=value.device, dtype=value.dtype)
+    return (value * weights_tensor).sum(dim=-1)
+
+
+def _prepare_episode_reward(
+    value: torch.Tensor,
+    done: torch.Tensor,
+    *,
+    weights: tuple[float, ...] | None,
+) -> torch.Tensor:
+    if value.shape[: done.ndim] != done.shape:
+        msg = (
+            "episode_reward shape must share done-prefix dimensions: "
+            f"episode_reward={tuple(value.shape)} done={tuple(done.shape)}"
+        )
+        raise ValueError(msg)
+
+    if value.ndim == done.ndim:
+        return value
+
+    reduce_dims = tuple(range(done.ndim, value.ndim - 1))
+    if reduce_dims:
+        value = value.mean(dim=reduce_dims)
+    return _scalarize_last_dim(value, weights)
+
+
 class LoggingCollectionMetricsHook(TrainerHookBase):
     """Logs BenchMARL-like collection metrics in the ``collection/`` namespace."""
 
@@ -47,6 +91,7 @@ class LoggingCollectionMetricsHook(TrainerHookBase):
         reward_key: tuple[str, ...] | None = None,
         done_key: tuple[str, ...] = ("next", "done"),
         episode_reward_key: tuple[str, ...] | None = None,
+        episode_reward_weights: Sequence[float] | None = None,
         reduce_stats: bool | None = None,
     ) -> None:
         self.group = group
@@ -54,6 +99,9 @@ class LoggingCollectionMetricsHook(TrainerHookBase):
         self.done_key = done_key
         self.episode_reward_key = (
             episode_reward_key if episode_reward_key is not None else ("next", group, "episode_reward")
+        )
+        self.episode_reward_weights = (
+            tuple(float(weight) for weight in episode_reward_weights) if episode_reward_weights is not None else None
         )
         self.reduce_stats = reduce_stats
 
@@ -85,7 +133,11 @@ class LoggingCollectionMetricsHook(TrainerHookBase):
             out["collection/done_rate"] = _as_float(done.float().mean())
 
             if self.episode_reward_key is not None and self.episode_reward_key in keys and done.any():
-                episode_reward = batch.get(self.episode_reward_key).float().mean(dim=-2).squeeze(-1)
+                episode_reward = _prepare_episode_reward(
+                    batch.get(self.episode_reward_key).float(),
+                    done,
+                    weights=self.episode_reward_weights,
+                )
                 ended_episode_reward = episode_reward[done]
                 if ended_episode_reward.numel() > 0:
                     out.update(
@@ -115,6 +167,7 @@ class LoggingCollectionMetricsHook(TrainerHookBase):
             "reward_key": self.reward_key,
             "done_key": self.done_key,
             "episode_reward_key": self.episode_reward_key,
+            "episode_reward_weights": self.episode_reward_weights,
             "reduce_stats": self.reduce_stats,
         }
 
@@ -124,6 +177,10 @@ class LoggingCollectionMetricsHook(TrainerHookBase):
         self.done_key = tuple(state_dict.get("done_key", self.done_key))
         episode_reward_key = state_dict.get("episode_reward_key", self.episode_reward_key)
         self.episode_reward_key = None if episode_reward_key is None else tuple(episode_reward_key)
+        episode_reward_weights = state_dict.get("episode_reward_weights", self.episode_reward_weights)
+        self.episode_reward_weights = (
+            None if episode_reward_weights is None else tuple(float(weight) for weight in episode_reward_weights)
+        )
         reduce_stats = state_dict.get("reduce_stats", self.reduce_stats)
         self.reduce_stats = None if reduce_stats is None else bool(reduce_stats)
 
@@ -517,6 +574,7 @@ class LoggingHookSet:
         reward_key: tuple[str, ...] | None = None,
         done_key: tuple[str, ...] = ("next", "done"),
         episode_reward_key: tuple[str, ...] | None = None,
+        episode_reward_weights: Sequence[float] | None = None,
         reduce_stats: bool | None = None,
         eval_hook_set: LoggingEvaluationHookSet | None = None,
     ) -> None:
@@ -526,6 +584,7 @@ class LoggingHookSet:
             reward_key=reward_key,
             done_key=done_key,
             episode_reward_key=episode_reward_key,
+            episode_reward_weights=episode_reward_weights,
             reduce_stats=reduce_stats,
         )
         self.training_hook = LoggingTrainingMetricsHook(group=group)

@@ -327,6 +327,41 @@ def test_logging_collection_metrics_hook_supports_custom_reward_key():
     assert "collection/done_rate" in out
 
 
+def test_logging_collection_metrics_hook_scalarizes_vector_episode_reward():
+    done = torch.tensor([[[False], [True], [False]], [[False], [False], [True]]])
+    batch = TensorDict(
+        {
+            "next": TensorDict(
+                {
+                    "done": done,
+                    "reward": torch.ones(2, 3, 1),
+                    "episode_reward": torch.tensor(
+                        [
+                            [[1.0, 2.0], [2.0, 4.0], [3.0, 6.0]],
+                            [[4.0, 8.0], [5.0, 10.0], [6.0, 12.0]],
+                        ]
+                    ),
+                },
+                batch_size=[2, 3],
+            ),
+        },
+        batch_size=[2, 3],
+    )
+
+    hook = LoggingCollectionMetricsHook(
+        group="agent",
+        reward_key=("next", "reward"),
+        done_key=("next", "done"),
+        episode_reward_key=("next", "episode_reward"),
+        episode_reward_weights=[0.2, 0.8],
+    )
+    out = hook(batch)
+
+    assert out["collection/agent/reward/episode_reward_min"] == pytest.approx(3.6)
+    assert out["collection/agent/reward/episode_reward_mean"] == pytest.approx(7.2)
+    assert out["collection/agent/reward/episode_reward_max"] == pytest.approx(10.8)
+
+
 def test_logging_evaluation_hook_set_creates_configured_variants():
     hook_set = LoggingEvaluationHookSet(
         policy=MagicMock(),

@@ -310,6 +310,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv | SerialEnv) -> tuple[PPOT
         reward_key=_with_next_prefix(reward_key),
         done_key=("next", "done"),
         episode_reward_key=("next", "episode_reward"),
+        episode_reward_weights=cfg.scalarization.weights,
         eval_hook_set=eval_hook_set,
     )
     logging_hooks.register(trainer)
