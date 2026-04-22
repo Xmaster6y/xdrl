@@ -1,0 +1,67 @@
+algo: mappo
+seed: 0
+
+env:
+  scenario: balance
+  continuous_actions: true
+  num_envs: 600
+  max_steps: 100
+  device: cpu
+  scenario_kwargs: {}
+
+collector:
+  frames_per_batch: 60000
+  total_frames: 10000000
+  no_cuda_sync: false
+
+model:
+  group: agents
+  hidden_dim: 256
+  depth: 2
+  share_policy_params: false
+  share_critic_params: true
+
+loss:
+  clip_epsilon: 0.2
+  entropy_coef: 0.001
+  gamma: 0.9
+  lmbda: 0.95
+
+optim:
+  lr: 0.00005
+  clip_grad_norm: true
+  max_grad_norm: 5.0
+
+train:
+  device: cpu
+  storing_device: cpu
+  frame_skip: 1
+  num_epochs: 1
+  minibatch_size: 4096
+  optim_steps_per_batch: 45
+  progress_bar: true
+  save_trainer_interval: null
+  policy_checkpoint_interval: 0
+  policy_checkpoint_dir: checkpoints/policy
+  policy_checkpoint_prefix: policy
+
+eval:
+  enabled: true
+  pre_eval: true
+  interval_frames: 120000
+  episodes: 200
+  max_steps: 100
+  deterministic: true
+  non_deterministic: true
+  render: true
+  video_fps: 20
+
+logger:
+  backend: wandb
+  log_dir: logs
+  experiment_name: vmas_ppo
+  log_hparams: true
+  metric_group: agents
+  log_interval: 60000
+  wandb_kwargs:
+    project: xdrl

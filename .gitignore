@@ -139,5 +139,7 @@ wandb
 outputs
 .vscode
 .cursor
+logs
+multirun
 
 *secret*

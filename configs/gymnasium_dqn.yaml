@@ -1,0 +1,51 @@
+seed: 0
+
+env:
+  id: CartPole-v1
+
+collector:
+  total_frames: 50000
+
+model:
+  hidden_dim: 256
+  depth: 2
+
+loss:
+  gamma: 0.99
+
+optim:
+  lr: 0.0003
+
+train:
+  device: cpu
+  frame_skip: 1
+  batch_size: 256
+  replay_buffer_size: 50000
+  learning_starts: 1000
+  target_update_interval: 250
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay_steps: 25000
+  reward_window: 20
+  log_episodes: false
+
+eval:
+  enabled: true
+  pre_eval: true
+  interval_frames: 5000
+  episodes: 16
+  max_steps: 500
+  deterministic: true
+  non_deterministic: true
+  render: true
+  video_fps: 20
+
+logger:
+  backend: wandb
+  log_dir: logs
+  experiment_name: gymnasium_dqn
+  log_hparams: true
+  metric_group: agent
+  log_interval: 1000
+  wandb_kwargs:
+    project: xdrl

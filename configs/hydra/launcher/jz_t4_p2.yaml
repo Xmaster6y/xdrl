@@ -1,0 +1,5 @@
+defaults:
+  - jz_t4
+
+cpus_per_task: 3
+partition: gpu_p2l
