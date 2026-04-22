@@ -14,7 +14,7 @@ from __future__ import annotations
 import hydra
 import torch
 from loguru import logger as pylogger
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from tensordict.nn import TensorDictModule
 from tensordict.nn.distributions import NormalParamExtractor
 from torch import nn
@@ -26,13 +26,13 @@ from torchrl.envs.libs.vmas import VmasEnv
 from torchrl.modules import ProbabilisticActor, TanhNormal, ValueOperator
 from torchrl.modules.models.multiagent import MultiAgentMLP
 from torchrl.objectives import ClipPPOLoss, ValueEstimators
-from torchrl.record.loggers import get_logger
 from torchrl.trainers.algorithms.ppo import PPOTrainer
 from torchrl.trainers.trainers import BatchSubSampler
 
+from scripts.build import close_experiment_logger, make_experiment_logger
 from xdrl.trainer_hooks import (
     ExpandSharedNextKeysHook,
-    LoggingEvaluationMetricsHook,
+    LoggingEvaluationHookSet,
     LoggingHookSet,
     MultiAgentGAEHook,
     PolicyCheckpointHook,
@@ -207,24 +207,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
 
     optimizer = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr)
 
-    wandb_kwargs_cfg = cfg.logger.get("wandb_kwargs")
-    trackio_kwargs_cfg = cfg.logger.get("trackio_kwargs")
-    trainer_logger = get_logger(
-        logger_type=cfg.logger.backend,
-        logger_name=cfg.logger.log_dir,
-        experiment_name=cfg.logger.experiment_name,
-        wandb_kwargs=(
-            OmegaConf.to_container(wandb_kwargs_cfg, resolve=True)
-            if OmegaConf.is_config(wandb_kwargs_cfg)
-            else (wandb_kwargs_cfg or {})
-        ),
-        trackio_kwargs=(
-            OmegaConf.to_container(trackio_kwargs_cfg, resolve=True)
-            if OmegaConf.is_config(trackio_kwargs_cfg)
-            else (trackio_kwargs_cfg or {})
-        ),
-    )
-    trainer_logger.log_hparams(OmegaConf.to_container(cfg, resolve=True))
+    trainer_logger = make_experiment_logger(cfg)
 
     trainer = PPOTrainer(
         collector=collector,
@@ -239,7 +222,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
         progress_bar=cfg.train.progress_bar,
         seed=cfg.seed,
         save_trainer_interval=cfg.train.save_trainer_interval,
-        log_interval=cfg.train.log_interval,
+        log_interval=cfg.logger.log_interval,
         num_epochs=cfg.train.num_epochs,
         replay_buffer=None,
         enable_logging=False,
@@ -285,7 +268,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
             checkpoint_prefix,
         )
 
-    eval_hooks: list[LoggingEvaluationMetricsHook] = []
+    eval_hook_set = None
     if cfg.eval.enabled:
         pylogger.info(
             "Evaluation enabled: pre_eval={} interval_frames={} episodes={} render={} deterministic={} non_deterministic={}",
@@ -297,39 +280,26 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
             cfg.eval.non_deterministic,
         )
         eval_env = make_eval_env(cfg)
-        if cfg.eval.deterministic:
-            eval_hooks.append(
-                LoggingEvaluationMetricsHook(
-                    policy=actor,
-                    environment=eval_env,
-                    group=group,
-                    metric_subgroup="deterministic",
-                    interval_frames=cfg.eval.interval_frames,
-                    max_steps=cfg.eval.max_steps,
-                    deterministic=True,
-                    render=cfg.eval.render,
-                    video_fps=cfg.eval.video_fps,
-                )
-            )
-        if cfg.eval.non_deterministic:
-            eval_hooks.append(
-                LoggingEvaluationMetricsHook(
-                    policy=actor,
-                    environment=eval_env,
-                    group=group,
-                    metric_subgroup="non_deterministic",
-                    interval_frames=cfg.eval.interval_frames,
-                    max_steps=cfg.eval.max_steps,
-                    deterministic=False,
-                    render=cfg.eval.render,
-                    video_fps=cfg.eval.video_fps,
-                )
-            )
+        eval_hook_set = LoggingEvaluationHookSet(
+            policy=actor,
+            environment=eval_env,
+            group=cfg.logger.metric_group,
+            reward_key=("next", group, "reward"),
+            interval_frames=cfg.eval.interval_frames,
+            max_steps=cfg.eval.max_steps,
+            deterministic=cfg.eval.deterministic,
+            non_deterministic=cfg.eval.non_deterministic,
+            render=cfg.eval.render,
+            video_fps=cfg.eval.video_fps,
+        )
 
     logging_hooks = LoggingHookSet(
-        group=group,
+        group=cfg.logger.metric_group,
         frame_skip=cfg.train.frame_skip,
-        eval_hooks=eval_hooks,
+        reward_key=("next", group, "reward"),
+        done_key=("next", "done"),
+        episode_reward_key=("next", group, "episode_reward"),
+        eval_hook_set=eval_hook_set,
     )
     logging_hooks.register(trainer)
 
@@ -360,6 +330,7 @@ def main(cfg: DictConfig) -> None:
         trainer.collector.shutdown()
         if not env.is_closed:
             env.close()
+        close_experiment_logger(cfg)
 
 
 if __name__ == "__main__":

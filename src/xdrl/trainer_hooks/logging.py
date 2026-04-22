@@ -11,9 +11,7 @@ from torchrl.envs import ExplorationType
 from torchrl.envs.utils import set_exploration_type
 from torchrl.trainers.trainers import Trainer, TrainerHookBase
 
-
-def _as_float(value: torch.Tensor) -> float:
-    return float(value.detach().cpu().item())
+from xdrl.trainer_hooks._utils import _as_float
 
 
 def _min_mean_max(prefix: str, value: torch.Tensor) -> dict[str, float]:
@@ -23,6 +21,14 @@ def _min_mean_max(prefix: str, value: torch.Tensor) -> dict[str, float]:
         f"{prefix}_mean": _as_float(flat_value.mean()),
         f"{prefix}_max": _as_float(flat_value.max()),
     }
+
+
+def _summarize_metric(prefix: str, value: torch.Tensor, *, reduce_stats: bool | None = None) -> dict[str, float]:
+    if reduce_stats is None:
+        reduce_stats = value.numel() > 1
+    if reduce_stats:
+        return _min_mean_max(prefix, value)
+    return {prefix: _as_float(value.reshape(-1)[0])}
 
 
 def _collector_mask(batch: TensorDictBase) -> torch.Tensor | None:
@@ -35,44 +41,67 @@ def _collector_mask(batch: TensorDictBase) -> torch.Tensor | None:
 class LoggingCollectionMetricsHook(TrainerHookBase):
     """Logs BenchMARL-like collection metrics in the ``collection/`` namespace."""
 
-    def __init__(self, group: str = "agents") -> None:
+    def __init__(
+        self,
+        group: str = "agents",
+        reward_key: tuple[str, ...] | None = None,
+        done_key: tuple[str, ...] = ("next", "done"),
+        episode_reward_key: tuple[str, ...] | None = None,
+        reduce_stats: bool | None = None,
+    ) -> None:
         self.group = group
+        self.reward_key = reward_key if reward_key is not None else ("next", group, "reward")
+        self.done_key = done_key
+        self.episode_reward_key = (
+            episode_reward_key if episode_reward_key is not None else ("next", group, "episode_reward")
+        )
+        self.reduce_stats = reduce_stats
 
     def __call__(self, batch: TensorDictBase) -> dict[str, float]:
         keys = set(batch.keys(True, True))
-        reward_key = ("next", self.group, "reward")
-        if reward_key not in keys:
+        if self.reward_key not in keys:
             return {}
 
         out: dict[str, float] = {}
         mask = _collector_mask(batch)
 
-        reward = batch.get(reward_key).float()
+        reward = batch.get(self.reward_key).float()
         if mask is not None:
             reward = reward[mask]
         if reward.numel() > 0:
-            out.update(_min_mean_max(f"collection/{self.group}/reward/reward", reward))
-            out.update(_min_mean_max("collection/reward/reward", reward))
+            out.update(
+                _summarize_metric(
+                    f"collection/{self.group}/reward/reward",
+                    reward,
+                    reduce_stats=self.reduce_stats,
+                )
+            )
+            out.update(_summarize_metric("collection/reward/reward", reward, reduce_stats=self.reduce_stats))
 
-        done_key = ("next", "done")
-        if done_key in keys:
-            done = batch.get(done_key).squeeze(-1).bool()
+        if self.done_key in keys:
+            done = batch.get(self.done_key).squeeze(-1).bool()
             if mask is not None:
                 done = done & mask
             out["collection/done_rate"] = _as_float(done.float().mean())
 
-            episode_key = ("next", self.group, "episode_reward")
-            if episode_key in keys and done.any():
-                episode_reward = batch.get(episode_key).float().mean(dim=-2).squeeze(-1)
+            if self.episode_reward_key is not None and self.episode_reward_key in keys and done.any():
+                episode_reward = batch.get(self.episode_reward_key).float().mean(dim=-2).squeeze(-1)
                 ended_episode_reward = episode_reward[done]
                 if ended_episode_reward.numel() > 0:
                     out.update(
-                        _min_mean_max(
+                        _summarize_metric(
                             f"collection/{self.group}/reward/episode_reward",
                             ended_episode_reward,
+                            reduce_stats=self.reduce_stats,
                         )
                     )
-                    out.update(_min_mean_max("collection/reward/episode_reward", ended_episode_reward))
+                    out.update(
+                        _summarize_metric(
+                            "collection/reward/episode_reward",
+                            ended_episode_reward,
+                            reduce_stats=self.reduce_stats,
+                        )
+                    )
 
         return out
 
@@ -81,10 +110,22 @@ class LoggingCollectionMetricsHook(TrainerHookBase):
         trainer.register_module(name, self)
 
     def state_dict(self) -> dict[str, Any]:
-        return {"group": self.group}
+        return {
+            "group": self.group,
+            "reward_key": self.reward_key,
+            "done_key": self.done_key,
+            "episode_reward_key": self.episode_reward_key,
+            "reduce_stats": self.reduce_stats,
+        }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self.group = state_dict.get("group", self.group)
+        self.reward_key = tuple(state_dict.get("reward_key", self.reward_key))
+        self.done_key = tuple(state_dict.get("done_key", self.done_key))
+        episode_reward_key = state_dict.get("episode_reward_key", self.episode_reward_key)
+        self.episode_reward_key = None if episode_reward_key is None else tuple(episode_reward_key)
+        reduce_stats = state_dict.get("reduce_stats", self.reduce_stats)
+        self.reduce_stats = None if reduce_stats is None else bool(reduce_stats)
 
 
 class LoggingTrainingMetricsHook(TrainerHookBase):
@@ -157,9 +198,12 @@ class LoggingCountersHook(TrainerHookBase):
 class LoggingProgressMetricsHook(TrainerHookBase):
     """Logs a compact progress-bar view for collection and counters metrics."""
 
-    def __init__(self, *, group: str, counters_hook: LoggingCountersHook) -> None:
+    def __init__(
+        self, *, group: str, counters_hook: LoggingCountersHook, reward_key: tuple[str, ...] | None = None
+    ) -> None:
         self.group = group
         self.counters_hook = counters_hook
+        self.reward_key = reward_key if reward_key is not None else ("next", group, "reward")
 
     def __call__(self, batch: TensorDictBase) -> dict[str, float | bool]:
         out: dict[str, float | bool] = {
@@ -167,9 +211,8 @@ class LoggingProgressMetricsHook(TrainerHookBase):
             "log_pbar": True,
         }
 
-        reward_key = ("next", self.group, "reward")
-        if reward_key in batch.keys(True, True):
-            reward = batch.get(reward_key).float()
+        if self.reward_key in batch.keys(True, True):
+            reward = batch.get(self.reward_key).float()
             mask = _collector_mask(batch)
             if mask is not None:
                 reward = reward[mask]
@@ -182,10 +225,11 @@ class LoggingProgressMetricsHook(TrainerHookBase):
         trainer.register_module(name, self)
 
     def state_dict(self) -> dict[str, Any]:
-        return {"group": self.group}
+        return {"group": self.group, "reward_key": self.reward_key}
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self.group = state_dict.get("group", self.group)
+        self.reward_key = tuple(state_dict.get("reward_key", self.reward_key))
 
 
 class LoggingEvaluationMetricsHook(TrainerHookBase):
@@ -203,11 +247,15 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
         deterministic: bool,
         render: bool,
         video_fps: int,
+        reward_key: tuple[str, ...] | None = None,
+        reduce_stats: bool | None = None,
         logger: Any | None = None,
     ) -> None:
         self.policy = policy
         self.environment = environment
         self.group = group
+        self.reward_key = reward_key if reward_key is not None else ("next", group, "reward")
+        self.reduce_stats = reduce_stats
         self.metric_subgroup = metric_subgroup
         self.interval_frames = interval_frames
         self.max_steps = max_steps
@@ -256,7 +304,7 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
 
         evaluation_time = time.perf_counter() - start
 
-        reward = rollout.get(("next", self.group, "reward")).float()
+        reward = rollout.get(self.reward_key).float()
         if reward.ndim >= 3:
             episode_return = reward.sum(dim=-3).mean(dim=-2).squeeze(-1)
         else:
@@ -277,12 +325,19 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
             f"eval/{self.metric_subgroup}/reward/episode_len_mean": float(np.mean(lengths)) if lengths else 0.0,
         }
         out.update(
-            _min_mean_max(
+            _summarize_metric(
                 f"eval/{self.metric_subgroup}/{self.group}/reward/episode_reward",
                 episode_return,
+                reduce_stats=self.reduce_stats,
             )
         )
-        out.update(_min_mean_max(f"eval/{self.metric_subgroup}/reward/episode_reward", episode_return))
+        out.update(
+            _summarize_metric(
+                f"eval/{self.metric_subgroup}/reward/episode_reward",
+                episode_return,
+                reduce_stats=self.reduce_stats,
+            )
+        )
 
         target_logger = self.trainer.logger if self.trainer is not None else self.logger
         if video_frames and target_logger is not None:
@@ -340,6 +395,8 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
     def state_dict(self) -> dict[str, Any]:
         return {
             "group": self.group,
+            "reward_key": self.reward_key,
+            "reduce_stats": self.reduce_stats,
             "metric_subgroup": self.metric_subgroup,
             "interval_frames": self.interval_frames,
             "max_steps": self.max_steps,
@@ -350,12 +407,81 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self.group = state_dict.get("group", self.group)
+        self.reward_key = tuple(state_dict.get("reward_key", self.reward_key))
+        reduce_stats = state_dict.get("reduce_stats", self.reduce_stats)
+        self.reduce_stats = None if reduce_stats is None else bool(reduce_stats)
         self.metric_subgroup = state_dict.get("metric_subgroup", self.metric_subgroup)
         self.interval_frames = int(state_dict.get("interval_frames", self.interval_frames))
         self.max_steps = int(state_dict.get("max_steps", self.max_steps))
         self.deterministic = bool(state_dict.get("deterministic", self.deterministic))
         self.render = bool(state_dict.get("render", self.render))
         self.video_fps = int(state_dict.get("video_fps", self.video_fps))
+
+
+class LoggingEvaluationHookSet:
+    """Composed deterministic/non-deterministic evaluation hooks."""
+
+    def __init__(
+        self,
+        *,
+        policy: torch.nn.Module,
+        environment,
+        group: str,
+        interval_frames: int,
+        max_steps: int,
+        deterministic: bool,
+        non_deterministic: bool,
+        render: bool,
+        video_fps: int,
+        reward_key: tuple[str, ...] | None = None,
+        reduce_stats: bool | None = None,
+        logger: Any | None = None,
+    ) -> None:
+        self.hooks: list[LoggingEvaluationMetricsHook] = []
+        shared_kwargs = {
+            "policy": policy,
+            "environment": environment,
+            "group": group,
+            "reward_key": reward_key,
+            "reduce_stats": reduce_stats,
+            "interval_frames": interval_frames,
+            "max_steps": max_steps,
+            "render": render,
+            "video_fps": video_fps,
+            "logger": logger,
+        }
+
+        if deterministic:
+            self.hooks.append(
+                LoggingEvaluationMetricsHook(
+                    metric_subgroup="deterministic",
+                    deterministic=True,
+                    **shared_kwargs,
+                )
+            )
+
+        if non_deterministic:
+            self.hooks.append(
+                LoggingEvaluationMetricsHook(
+                    metric_subgroup="non_deterministic",
+                    deterministic=False,
+                    **shared_kwargs,
+                )
+            )
+
+    def register(self, trainer: Trainer, name: str = "logging_evaluation_metrics") -> None:
+        for idx, hook in enumerate(self.hooks):
+            hook.register(trainer, name=f"{name}_{idx}")
+
+    def run(self, *, step: int) -> dict[str, float]:
+        out: dict[str, float] = {}
+        for hook in self.hooks:
+            out.update(hook.run(step=step))
+        return out
+
+    def close(self) -> None:
+        for hook in self.hooks:
+            hook.close()
 
 
 class LoggingHookSet:
@@ -366,14 +492,28 @@ class LoggingHookSet:
         *,
         group: str,
         frame_skip: int,
-        eval_hooks: list[LoggingEvaluationMetricsHook] | None = None,
+        reward_key: tuple[str, ...] | None = None,
+        done_key: tuple[str, ...] = ("next", "done"),
+        episode_reward_key: tuple[str, ...] | None = None,
+        reduce_stats: bool | None = None,
+        eval_hook_set: LoggingEvaluationHookSet | None = None,
     ) -> None:
         self.group = group
-        self.collection_hook = LoggingCollectionMetricsHook(group=group)
+        self.collection_hook = LoggingCollectionMetricsHook(
+            group=group,
+            reward_key=reward_key,
+            done_key=done_key,
+            episode_reward_key=episode_reward_key,
+            reduce_stats=reduce_stats,
+        )
         self.training_hook = LoggingTrainingMetricsHook(group=group)
         self.counters_hook = LoggingCountersHook(frame_skip=frame_skip)
-        self.progress_hook = LoggingProgressMetricsHook(group=group, counters_hook=self.counters_hook)
-        self.eval_hooks = eval_hooks or []
+        self.progress_hook = LoggingProgressMetricsHook(
+            group=group,
+            counters_hook=self.counters_hook,
+            reward_key=reward_key,
+        )
+        self.eval_hook_set = eval_hook_set
 
         self._iteration_start: float | None = None
         self._previous_iteration_end: float | None = None
@@ -412,15 +552,14 @@ class LoggingHookSet:
         trainer.register_op("pre_steps_log", self.progress_hook)
 
         trainer.register_op("post_steps_log", self._timers_end)
-        for idx, eval_hook in enumerate(self.eval_hooks):
-            eval_hook.register(trainer, name=f"logging_evaluation_metrics_{idx}")
+        if self.eval_hook_set is not None:
+            self.eval_hook_set.register(trainer)
 
     def run_pre_eval(self) -> dict[str, float]:
-        out: dict[str, float] = {}
-        for eval_hook in self.eval_hooks:
-            out.update(eval_hook.run(step=0))
-        return out
+        if self.eval_hook_set is None:
+            return {}
+        return self.eval_hook_set.run(step=0)
 
     def close(self) -> None:
-        for eval_hook in self.eval_hooks:
-            eval_hook.close()
+        if self.eval_hook_set is not None:
+            self.eval_hook_set.close()

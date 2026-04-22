@@ -14,7 +14,7 @@ import hydra
 import mo_gymnasium  # noqa: F401
 import torch
 from loguru import logger as pylogger
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModule
 from tensordict.nn.distributions import NormalParamExtractor
@@ -22,15 +22,19 @@ from torch import nn
 from torch.distributions import Categorical
 
 from torchrl.collectors import Collector
-from torchrl.envs import EnvCreator, GymEnv, SerialEnv
+from torchrl.envs import EnvCreator, GymEnv, RewardSum, SerialEnv, TransformedEnv
 from torchrl.modules import ProbabilisticActor, TanhNormal, ValueOperator
 from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value.advantages import GAE
-from torchrl.record.loggers import get_logger
 from torchrl.trainers.algorithms.ppo import PPOTrainer
-from torchrl.trainers.trainers import LogScalar, TrainerHookBase
+from torchrl.trainers.trainers import TrainerHookBase
 
-from xdrl.trainer_hooks import ReduceLossTensorsHook, WeightedSumRewardHook
+from scripts.build import close_experiment_logger, make_experiment_logger
+from xdrl.trainer_hooks import (
+    LoggingEvaluationHookSet,
+    LoggingHookSet,
+    WeightedSumRewardHook,
+)
 
 
 def _to_key(value: str | list[str] | tuple[str, ...] | None) -> str | tuple[str, ...] | None:
@@ -105,13 +109,31 @@ class ScalarizedGAEHook(TrainerHookBase):
         return batch
 
 
-def make_env(cfg: DictConfig) -> GymEnv | SerialEnv:
-    def _single_env() -> GymEnv:
-        return GymEnv(cfg.env.id, device=cfg.env.device)
+def _single_env(cfg: DictConfig, *, render_mode: str | None = None) -> TransformedEnv:
+    kwargs = {} if render_mode is None else {"render_mode": render_mode}
+    base_env = GymEnv(cfg.env.id, device=cfg.env.device, **kwargs)
+    return TransformedEnv(
+        base_env,
+        RewardSum(in_keys=[base_env.reward_key], out_keys=["episode_reward"]),
+    )
+
+
+def make_env(cfg: DictConfig) -> TransformedEnv | SerialEnv:
+    def _build() -> TransformedEnv:
+        return _single_env(cfg)
 
     if cfg.env.num_envs == 1:
-        return _single_env()
-    return SerialEnv(cfg.env.num_envs, EnvCreator(_single_env))
+        return _build()
+    return SerialEnv(cfg.env.num_envs, EnvCreator(_build))
+
+
+def make_eval_env(cfg: DictConfig) -> TransformedEnv | SerialEnv:
+    def _build() -> TransformedEnv:
+        return _single_env(cfg, render_mode="rgb_array" if cfg.eval.render else None)
+
+    if cfg.eval.episodes == 1:
+        return _build()
+    return SerialEnv(cfg.eval.episodes, EnvCreator(_build))
 
 
 def make_modules(env: GymEnv | SerialEnv, cfg: DictConfig) -> tuple[ProbabilisticActor, ValueOperator]:
@@ -166,7 +188,7 @@ def make_modules(env: GymEnv | SerialEnv, cfg: DictConfig) -> tuple[Probabilisti
     return actor, critic
 
 
-def make_trainer(cfg: DictConfig, env: GymEnv | SerialEnv) -> PPOTrainer:
+def make_trainer(cfg: DictConfig, env: TransformedEnv | SerialEnv) -> tuple[PPOTrainer, LoggingHookSet]:
     actor, critic = make_modules(env, cfg)
 
     pylogger.info(
@@ -218,23 +240,7 @@ def make_trainer(cfg: DictConfig, env: GymEnv | SerialEnv) -> PPOTrainer:
 
     optimizer = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr)
 
-    wandb_kwargs_cfg = cfg.logger.get("wandb_kwargs")
-    trackio_kwargs_cfg = cfg.logger.get("trackio_kwargs")
-    trainer_logger = get_logger(
-        logger_type=cfg.logger.backend,
-        logger_name=cfg.logger.log_dir,
-        experiment_name=cfg.logger.experiment_name,
-        wandb_kwargs=(
-            OmegaConf.to_container(wandb_kwargs_cfg, resolve=True)
-            if OmegaConf.is_config(wandb_kwargs_cfg)
-            else (wandb_kwargs_cfg or {})
-        ),
-        trackio_kwargs=(
-            OmegaConf.to_container(trackio_kwargs_cfg, resolve=True)
-            if OmegaConf.is_config(trackio_kwargs_cfg)
-            else (trackio_kwargs_cfg or {})
-        ),
-    )
+    trainer_logger = make_experiment_logger(cfg)
 
     trainer = PPOTrainer(
         collector=collector,
@@ -249,7 +255,7 @@ def make_trainer(cfg: DictConfig, env: GymEnv | SerialEnv) -> PPOTrainer:
         progress_bar=cfg.train.progress_bar,
         seed=cfg.seed,
         save_trainer_interval=cfg.train.save_trainer_interval,
-        log_interval=cfg.train.log_interval,
+        log_interval=cfg.logger.log_interval,
         num_epochs=cfg.train.num_epochs,
         replay_buffer=None,
         enable_logging=False,
@@ -272,30 +278,43 @@ def make_trainer(cfg: DictConfig, env: GymEnv | SerialEnv) -> PPOTrainer:
             lmbda=cfg.loss.lmbda,
         ),
     )
-    trainer.register_op(dest="process_loss", op=ReduceLossTensorsHook())
 
-    trainer.register_op(
-        dest="pre_steps_log",
-        op=LogScalar(
-            key=_with_next_prefix(reward_key),
-            logname="reward",
-            log_pbar=True,
-            include_std=True,
-            reduction="mean",
-        ),
-    )
-    trainer.register_op(
-        dest="pre_steps_log",
-        op=LogScalar(
-            key=("next", "done"),
-            logname="done_rate",
-            log_pbar=False,
-            include_std=False,
-            reduction="mean",
-        ),
-    )
+    eval_hook_set = None
+    if cfg.eval.enabled:
+        pylogger.info(
+            "Evaluation enabled: pre_eval={} interval_frames={} episodes={} render={} deterministic={} non_deterministic={}",
+            cfg.eval.pre_eval,
+            cfg.eval.interval_frames,
+            cfg.eval.episodes,
+            cfg.eval.render,
+            cfg.eval.deterministic,
+            cfg.eval.non_deterministic,
+        )
+        eval_env = make_eval_env(cfg)
+        eval_hook_set = LoggingEvaluationHookSet(
+            policy=actor,
+            environment=eval_env,
+            group=cfg.logger.metric_group,
+            reward_key=_with_next_prefix(reward_key),
+            interval_frames=cfg.eval.interval_frames,
+            max_steps=cfg.eval.max_steps,
+            deterministic=cfg.eval.deterministic,
+            non_deterministic=cfg.eval.non_deterministic,
+            render=cfg.eval.render,
+            video_fps=cfg.eval.video_fps,
+        )
 
-    return trainer
+    logging_hooks = LoggingHookSet(
+        group=cfg.logger.metric_group,
+        frame_skip=cfg.train.frame_skip,
+        reward_key=_with_next_prefix(reward_key),
+        done_key=("next", "done"),
+        episode_reward_key=("next", "episode_reward"),
+        eval_hook_set=eval_hook_set,
+    )
+    logging_hooks.register(trainer)
+
+    return trainer, logging_hooks
 
 
 @hydra.main(config_path="../configs", config_name="mogymnasium_ppo", version_base=None)
@@ -309,13 +328,18 @@ def main(cfg: DictConfig) -> None:
     )
 
     env = make_env(cfg)
-    trainer = make_trainer(cfg, env)
+    trainer, logging_hooks = make_trainer(cfg, env)
     try:
+        if cfg.eval.enabled and cfg.eval.pre_eval:
+            pylogger.info("Running pre-training evaluation")
+            logging_hooks.run_pre_eval()
         trainer.train()
     finally:
+        logging_hooks.close()
         trainer.collector.shutdown()
         if hasattr(env, "is_closed") and not env.is_closed:
             env.close()
+        close_experiment_logger(cfg)
 
 
 if __name__ == "__main__":

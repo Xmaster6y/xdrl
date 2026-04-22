@@ -7,6 +7,7 @@ from torchrl.trainers.trainers import TrainerHookBase
 
 from xdrl.trainer_hooks import (
     ExpandSharedNextKeysHook,
+    LoggingEvaluationHookSet,
     LoggingHookSet,
     MultiAgentGAEHook,
     PolicyCheckpointHook,
@@ -277,6 +278,53 @@ def test_logging_collection_metrics_hook_emits_collection_namespaces():
     assert out["collection/done_rate"] == pytest.approx(done.float().mean().item())
 
 
+def test_logging_collection_metrics_hook_supports_custom_reward_key():
+    done = torch.tensor([[[False], [True], [False]], [[False], [False], [True]]])
+    batch = TensorDict(
+        {
+            "next": TensorDict(
+                {
+                    "done": done,
+                    "reward": torch.ones(2, 3, 1),
+                },
+                batch_size=[2, 3],
+            ),
+        },
+        batch_size=[2, 3],
+    )
+
+    hook = LoggingCollectionMetricsHook(
+        group="agent",
+        reward_key=("next", "reward"),
+        done_key=("next", "done"),
+        episode_reward_key=None,
+    )
+    out = hook(batch)
+
+    assert "collection/agent/reward/reward_mean" in out
+    assert "collection/reward/reward_mean" in out
+    assert "collection/done_rate" in out
+
+
+def test_logging_evaluation_hook_set_creates_configured_variants():
+    hook_set = LoggingEvaluationHookSet(
+        policy=MagicMock(),
+        environment=MagicMock(),
+        group="agents",
+        interval_frames=100,
+        max_steps=25,
+        deterministic=True,
+        non_deterministic=True,
+        render=False,
+        video_fps=20,
+        logger=MagicMock(),
+    )
+
+    assert len(hook_set.hooks) == 2
+    assert hook_set.hooks[0].metric_subgroup == "deterministic"
+    assert hook_set.hooks[1].metric_subgroup == "non_deterministic"
+
+
 def test_logging_counters_hook_tracks_total_frames():
     batch = TensorDict(
         {
@@ -297,31 +345,28 @@ def test_logging_hook_set_type_exists():
 
 
 def test_logging_hook_set_run_pre_eval_merges_multiple_eval_hooks():
-    eval_hook_one = MagicMock()
-    eval_hook_two = MagicMock()
-    eval_hook_one.run.return_value = {"eval/deterministic/reward/episode_len_mean": 10.0}
-    eval_hook_two.run.return_value = {"eval/non_deterministic/reward/episode_len_mean": 12.0}
+    eval_hook_set = MagicMock()
+    eval_hook_set.run.return_value = {
+        "eval/deterministic/reward/episode_len_mean": 10.0,
+        "eval/non_deterministic/reward/episode_len_mean": 12.0,
+    }
 
-    hook_set = LoggingHookSet(group="agents", frame_skip=1, eval_hooks=[eval_hook_one, eval_hook_two])
+    hook_set = LoggingHookSet(group="agents", frame_skip=1, eval_hook_set=eval_hook_set)
 
     out = hook_set.run_pre_eval()
 
-    eval_hook_one.run.assert_called_once_with(step=0)
-    eval_hook_two.run.assert_called_once_with(step=0)
+    eval_hook_set.run.assert_called_once_with(step=0)
     assert out["eval/deterministic/reward/episode_len_mean"] == 10.0
     assert out["eval/non_deterministic/reward/episode_len_mean"] == 12.0
 
 
 def test_logging_hook_set_registers_and_closes_multiple_eval_hooks():
-    eval_hook_one = MagicMock()
-    eval_hook_two = MagicMock()
+    eval_hook_set = MagicMock()
     trainer = MagicMock()
 
-    hook_set = LoggingHookSet(group="agents", frame_skip=1, eval_hooks=[eval_hook_one, eval_hook_two])
+    hook_set = LoggingHookSet(group="agents", frame_skip=1, eval_hook_set=eval_hook_set)
     hook_set.register(trainer)
     hook_set.close()
 
-    eval_hook_one.register.assert_called_once_with(trainer, name="logging_evaluation_metrics_0")
-    eval_hook_two.register.assert_called_once_with(trainer, name="logging_evaluation_metrics_1")
-    eval_hook_one.close.assert_called_once()
-    eval_hook_two.close.assert_called_once()
+    eval_hook_set.register.assert_called_once_with(trainer)
+    eval_hook_set.close.assert_called_once()

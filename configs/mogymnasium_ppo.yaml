@@ -41,11 +41,24 @@ train:
   optim_steps_per_batch: 8
   progress_bar: true
   save_trainer_interval: 10000
-  log_interval: 10000
+
+eval:
+  enabled: true
+  pre_eval: true
+  interval_frames: 20000
+  episodes: 32
+  max_steps: 1000
+  deterministic: true
+  non_deterministic: true
+  render: true
+  video_fps: 20
 
 logger:
   backend: wandb
   log_dir: logs
   experiment_name: mogymnasium_ppo
+  log_hparams: true
+  metric_group: agent
+  log_interval: 10000
   wandb_kwargs:
     project: xdrl

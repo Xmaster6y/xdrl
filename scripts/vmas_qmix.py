@@ -17,7 +17,7 @@ import hydra
 import numpy as np
 import torch
 from loguru import logger as pylogger
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModule, TensorDictSequential
 from torch import nn
@@ -32,22 +32,12 @@ from torchrl.modules import EGreedyModule, QValueModule, SafeSequential
 from torchrl.modules.models.multiagent import MultiAgentMLP, QMixer
 from torchrl.objectives import HardUpdate, SoftUpdate, ValueEstimators
 from torchrl.objectives.multiagent.qmixer import QMixerLoss
-from torchrl.record.loggers import get_logger
 
-from xdrl.trainer_hooks import LoggingEvaluationMetricsHook
-
-
-def _as_float(value: torch.Tensor) -> float:
-    return float(value.detach().cpu().item())
-
-
-def _min_mean_max(prefix: str, value: torch.Tensor) -> dict[str, float]:
-    flat_value = value.float().reshape(-1)
-    return {
-        f"{prefix}_min": _as_float(flat_value.min()),
-        f"{prefix}_mean": _as_float(flat_value.mean()),
-        f"{prefix}_max": _as_float(flat_value.max()),
-    }
+from scripts.build import close_experiment_logger, make_experiment_logger
+from xdrl.trainer_hooks import (
+    LoggingCollectionMetricsHook,
+    LoggingEvaluationHookSet,
+)
 
 
 def make_env(cfg: DictConfig, *, num_envs: int) -> TransformedEnv:
@@ -209,26 +199,15 @@ def main(cfg: DictConfig) -> None:
 
     optimizer = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr)
 
-    wandb_kwargs_cfg = cfg.logger.get("wandb_kwargs")
-    trackio_kwargs_cfg = cfg.logger.get("trackio_kwargs")
-    exp_logger = get_logger(
-        logger_type=cfg.logger.backend,
-        logger_name=cfg.logger.log_dir,
-        experiment_name=cfg.logger.experiment_name,
-        wandb_kwargs=(
-            OmegaConf.to_container(wandb_kwargs_cfg, resolve=True)
-            if OmegaConf.is_config(wandb_kwargs_cfg)
-            else (wandb_kwargs_cfg or {})
-        ),
-        trackio_kwargs=(
-            OmegaConf.to_container(trackio_kwargs_cfg, resolve=True)
-            if OmegaConf.is_config(trackio_kwargs_cfg)
-            else (trackio_kwargs_cfg or {})
-        ),
+    exp_logger = make_experiment_logger(cfg)
+    collection_metrics_hook = LoggingCollectionMetricsHook(
+        group=cfg.logger.metric_group,
+        reward_key=("next", cfg.model.group, "reward"),
+        done_key=("next", "done"),
+        episode_reward_key=("next", cfg.model.group, "episode_reward"),
     )
-    exp_logger.log_hparams(OmegaConf.to_container(cfg, resolve=True))
 
-    eval_hooks: list[LoggingEvaluationMetricsHook] = []
+    eval_hook_set = None
     if cfg.eval.enabled:
         pylogger.info(
             "Evaluation enabled: pre_eval={} interval_frames={} episodes={} render={} deterministic={} non_deterministic={}",
@@ -239,36 +218,19 @@ def main(cfg: DictConfig) -> None:
             cfg.eval.deterministic,
             cfg.eval.non_deterministic,
         )
-        if cfg.eval.deterministic:
-            eval_hooks.append(
-                LoggingEvaluationMetricsHook(
-                    policy=qnet,
-                    environment=eval_env,
-                    group=cfg.model.group,
-                    metric_subgroup="deterministic",
-                    interval_frames=cfg.eval.interval_frames,
-                    max_steps=cfg.eval.max_steps,
-                    deterministic=True,
-                    render=cfg.eval.render,
-                    video_fps=cfg.eval.video_fps,
-                    logger=exp_logger,
-                )
-            )
-        if cfg.eval.non_deterministic:
-            eval_hooks.append(
-                LoggingEvaluationMetricsHook(
-                    policy=qnet,
-                    environment=eval_env,
-                    group=cfg.model.group,
-                    metric_subgroup="non_deterministic",
-                    interval_frames=cfg.eval.interval_frames,
-                    max_steps=cfg.eval.max_steps,
-                    deterministic=False,
-                    render=cfg.eval.render,
-                    video_fps=cfg.eval.video_fps,
-                    logger=exp_logger,
-                )
-            )
+        eval_hook_set = LoggingEvaluationHookSet(
+            interval_frames=cfg.eval.interval_frames,
+            max_steps=cfg.eval.max_steps,
+            deterministic=cfg.eval.deterministic,
+            non_deterministic=cfg.eval.non_deterministic,
+            render=cfg.eval.render,
+            video_fps=cfg.eval.video_fps,
+            policy=qnet,
+            environment=eval_env,
+            group=cfg.logger.metric_group,
+            reward_key=("next", cfg.model.group, "reward"),
+            logger=exp_logger,
+        )
 
     total_frames = 0
     total_time = 0.0
@@ -277,8 +239,8 @@ def main(cfg: DictConfig) -> None:
     try:
         if cfg.eval.enabled and cfg.eval.pre_eval:
             pylogger.info("Running pre-training evaluation")
-            for eval_hook in eval_hooks:
-                eval_hook.run(step=0)
+            if eval_hook_set is not None:
+                eval_hook_set.run(step=0)
 
         for iteration, batch in enumerate(collector, start=1):
             sampling_time = time.perf_counter() - sampling_start
@@ -332,23 +294,20 @@ def main(cfg: DictConfig) -> None:
                 "timers/training_time": float(training_time),
                 "timers/iteration_time": float(iteration_time),
                 "timers/total_time": float(total_time),
-                "collection/done_rate": float(batch.get(("next", "done")).float().mean().item()),
                 "train/epsilon": float(qnet_explore[1].eps.item()),
             }
-
-            reward = batch.get(("next", cfg.model.group, "reward")).float()
-            metrics.update(_min_mean_max("collection/reward/reward", reward))
-            metrics.update(_min_mean_max(f"collection/{cfg.model.group}/reward/reward", reward))
+            metrics.update(collection_metrics_hook(batch))
 
             if loss_values:
                 metrics["train/loss"] = float(np.mean(loss_values))
             if grad_norm_values:
                 metrics["train/grad_norm"] = float(np.mean(grad_norm_values))
 
-            for key, value in metrics.items():
-                exp_logger.log_scalar(key, value, step=total_frames)
+            if exp_logger is not None:
+                for key, value in metrics.items():
+                    exp_logger.log_scalar(key, value, step=total_frames)
 
-            if total_frames % cfg.train.log_interval == 0:
+            if total_frames % cfg.logger.log_interval == 0:
                 pylogger.info(
                     "iter={} frames={} replay={} epsilon={:.3f} loss={}",
                     iteration,
@@ -359,20 +318,21 @@ def main(cfg: DictConfig) -> None:
                 )
 
             if cfg.eval.enabled and cfg.eval.interval_frames > 0 and total_frames % cfg.eval.interval_frames == 0:
-                for eval_hook in eval_hooks:
-                    eval_hook.run(step=total_frames)
+                if eval_hook_set is not None:
+                    eval_hook_set.run(step=total_frames)
 
             sampling_start = time.perf_counter()
 
         pylogger.info("Training finished after {} frames", total_frames)
     finally:
-        for eval_hook in eval_hooks:
-            eval_hook.close()
+        if eval_hook_set is not None:
+            eval_hook_set.close()
         collector.shutdown()
         if not env.is_closed:
             env.close()
         if not eval_env.is_closed:
             eval_env.close()
+        close_experiment_logger(cfg)
 
 
 if __name__ == "__main__":

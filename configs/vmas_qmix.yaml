@@ -49,7 +49,6 @@ train:
   frame_skip: 1
   minibatch_size: 128
   optim_steps_per_batch: 1000
-  log_interval: 60000
 
 eval:
   enabled: true
@@ -66,5 +65,8 @@ logger:
   backend: wandb
   log_dir: logs
   experiment_name: vmas_qmix
+  log_hparams: true
+  metric_group: agents
+  log_interval: 60000
   wandb_kwargs:
     project: xdrl

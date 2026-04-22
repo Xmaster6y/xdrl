@@ -12,16 +12,23 @@ uv run -m scripts.gymnasium_dqn collector.total_frames=10000
 from __future__ import annotations
 
 import random
+import time
 from collections import deque
 
 import hydra
 import numpy as np
 import torch
 from loguru import logger as pylogger
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
+from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
 from torch import nn
-from torchrl.record.loggers import get_logger
+from torchrl.envs import EnvCreator, GymEnv, RewardSum, SerialEnv, TransformedEnv
+from torchrl.modules import QValueModule, SafeSequential
 from torchrl.record.loggers.common import Logger
+
+from scripts.build import close_experiment_logger, make_experiment_logger
+from xdrl.trainer_hooks import LoggingCollectionMetricsHook, LoggingCountersHook, LoggingEvaluationHookSet
 
 
 class QNetwork(nn.Module):
@@ -50,34 +57,43 @@ def make_env(cfg: DictConfig):
     return gym.make(cfg.env.id)
 
 
+def _single_eval_env(cfg: DictConfig) -> TransformedEnv:
+    kwargs = {"render_mode": "rgb_array"} if cfg.eval.render else {}
+    base_env = GymEnv(cfg.env.id, device=cfg.train.device, **kwargs)
+    return TransformedEnv(
+        base_env,
+        RewardSum(in_keys=[base_env.reward_key], out_keys=["episode_reward"]),
+    )
+
+
+def make_eval_env(cfg: DictConfig) -> TransformedEnv | SerialEnv:
+    def _build() -> TransformedEnv:
+        return _single_eval_env(cfg)
+
+    if cfg.eval.episodes == 1:
+        return _build()
+    return SerialEnv(cfg.eval.episodes, EnvCreator(_build))
+
+
+def make_eval_policy(q_net: QNetwork, eval_env: TransformedEnv | SerialEnv) -> SafeSequential:
+    actor_module = TensorDictModule(
+        q_net,
+        in_keys=["observation"],
+        out_keys=["action_value"],
+    )
+    value_module = QValueModule(
+        action_value_key="action_value",
+        out_keys=["action", "action_value", "chosen_action_value"],
+        spec=eval_env.full_action_spec_unbatched,
+    )
+    return SafeSequential(actor_module, value_module)
+
+
 def linear_epsilon(step: int, start: float, end: float, decay_steps: int) -> float:
     if decay_steps <= 0:
         return end
     progress = min(step / decay_steps, 1.0)
     return start + progress * (end - start)
-
-
-def make_exp_logger(cfg: DictConfig) -> Logger | None:
-    backend = cfg.logger.get("backend", "stdout")
-    if backend in ("stdout", "", None):
-        return None
-    wandb_kwargs_cfg = cfg.logger.get("wandb_kwargs")
-    trackio_kwargs_cfg = cfg.logger.get("trackio_kwargs")
-    return get_logger(
-        logger_type=backend,
-        logger_name=cfg.logger.log_dir,
-        experiment_name=cfg.logger.experiment_name,
-        wandb_kwargs=(
-            OmegaConf.to_container(wandb_kwargs_cfg, resolve=True)
-            if OmegaConf.is_config(wandb_kwargs_cfg)
-            else (wandb_kwargs_cfg or {})
-        ),
-        trackio_kwargs=(
-            OmegaConf.to_container(trackio_kwargs_cfg, resolve=True)
-            if OmegaConf.is_config(trackio_kwargs_cfg)
-            else (trackio_kwargs_cfg or {})
-        ),
-    )
 
 
 def train(cfg: DictConfig) -> None:
@@ -119,11 +135,45 @@ def train(cfg: DictConfig) -> None:
         device,
     )
 
-    exp_logger = make_exp_logger(cfg)
-    if exp_logger is not None:
-        exp_logger.log_hparams(OmegaConf.to_container(cfg, resolve=True))
+    exp_logger = make_experiment_logger(cfg)
+    collection_metrics_hook = LoggingCollectionMetricsHook(
+        group=cfg.logger.metric_group,
+        reward_key=("next", "reward"),
+        done_key=("next", "done"),
+        episode_reward_key=("next", "episode_reward"),
+    )
+    counters_hook = LoggingCountersHook(frame_skip=cfg.train.frame_skip)
+
+    eval_hook_set = None
+    if cfg.eval.enabled:
+        pylogger.info(
+            "Evaluation enabled: pre_eval={} interval_frames={} episodes={} render={} deterministic={} non_deterministic={}",
+            cfg.eval.pre_eval,
+            cfg.eval.interval_frames,
+            cfg.eval.episodes,
+            cfg.eval.render,
+            cfg.eval.deterministic,
+            cfg.eval.non_deterministic,
+        )
+        eval_env = make_eval_env(cfg)
+        eval_hook_set = LoggingEvaluationHookSet(
+            policy=make_eval_policy(q_net, eval_env),
+            environment=eval_env,
+            group=cfg.logger.metric_group,
+            reward_key=("next", "reward"),
+            interval_frames=cfg.eval.interval_frames,
+            max_steps=cfg.eval.max_steps,
+            deterministic=cfg.eval.deterministic,
+            non_deterministic=cfg.eval.non_deterministic,
+            render=cfg.eval.render,
+            video_fps=cfg.eval.video_fps,
+            logger=exp_logger,
+        )
 
     try:
+        if cfg.eval.enabled and cfg.eval.pre_eval and eval_hook_set is not None:
+            pylogger.info("Running pre-training evaluation")
+            eval_hook_set.run(step=0)
         _run_training_loop(
             cfg,
             env,
@@ -134,14 +184,15 @@ def train(cfg: DictConfig) -> None:
             optimizer,
             replay_buffer,
             exp_logger,
+            collection_metrics_hook,
+            counters_hook,
+            eval_hook_set,
         )
     finally:
+        if eval_hook_set is not None:
+            eval_hook_set.close()
         env.close()
-        if cfg.logger.get("backend") == "wandb":
-            import wandb
-
-            if wandb.run is not None:
-                wandb.finish()
+        close_experiment_logger(cfg)
 
 
 def _run_training_loop(
@@ -154,14 +205,19 @@ def _run_training_loop(
     optimizer: torch.optim.Adam,
     replay_buffer: deque,
     exp_logger: Logger | None,
+    collection_metrics_hook: LoggingCollectionMetricsHook,
+    counters_hook: LoggingCountersHook,
+    eval_hook_set: LoggingEvaluationHookSet | None,
 ) -> None:
     episode_reward = 0.0
     episode_length = 0
     episode_idx = 0
     recent_rewards = deque(maxlen=cfg.train.reward_window)
     last_loss: float | None = None
+    total_time = 0.0
 
     for step in range(1, cfg.collector.total_frames + 1):
+        sampling_start = time.perf_counter()
         epsilon = linear_epsilon(
             step,
             cfg.train.epsilon_start,
@@ -185,6 +241,9 @@ def _run_training_loop(
         obs = next_obs
         episode_reward += float(reward)
         episode_length += 1
+        episode_reward_for_metrics = float(episode_reward)
+
+        collection_time = time.perf_counter() - sampling_start
 
         if done:
             episode_idx += 1
@@ -201,6 +260,7 @@ def _run_training_loop(
             episode_reward = 0.0
             episode_length = 0
 
+        training_start = time.perf_counter()
         should_learn = step >= cfg.train.learning_starts and len(replay_buffer) >= cfg.train.batch_size
         if should_learn:
             transitions = random.sample(replay_buffer, cfg.train.batch_size)
@@ -228,7 +288,53 @@ def _run_training_loop(
             if step % cfg.train.target_update_interval == 0:
                 target_q_net.load_state_dict(q_net.state_dict())
 
-        if step % cfg.train.log_interval == 0:
+        training_time = time.perf_counter() - training_start
+        iteration_time = collection_time + training_time
+        total_time += iteration_time
+
+        step_batch = TensorDict(
+            {
+                "next": TensorDict(
+                    {
+                        "reward": torch.tensor([[[float(reward)]]], dtype=torch.float32),
+                        "done": torch.tensor([[[done]]], dtype=torch.bool),
+                        "episode_reward": torch.tensor([[[[episode_reward_for_metrics]]]], dtype=torch.float32),
+                    },
+                    batch_size=[1, 1],
+                )
+            },
+            batch_size=[1, 1],
+        )
+
+        metrics: dict[str, float] = {
+            "timers/collection_time": float(collection_time),
+            "timers/training_time": float(training_time),
+            "timers/iteration_time": float(iteration_time),
+            "timers/total_time": float(total_time),
+            "train/epsilon": float(epsilon),
+            "train/replay_size": float(len(replay_buffer)),
+        }
+        metrics.update({key: float(value) for key, value in counters_hook(step_batch).items()})
+        metrics.update(collection_metrics_hook(step_batch))
+
+        if recent_rewards:
+            metrics["train/mean_reward"] = float(np.mean(recent_rewards))
+        if last_loss is not None:
+            metrics["train/loss"] = float(last_loss)
+
+        if exp_logger is not None:
+            for key, value in metrics.items():
+                exp_logger.log_scalar(key, value, step=step)
+
+        if (
+            cfg.eval.enabled
+            and cfg.eval.interval_frames > 0
+            and step % cfg.eval.interval_frames == 0
+            and eval_hook_set is not None
+        ):
+            eval_hook_set.run(step=step)
+
+        if step % cfg.logger.log_interval == 0:
             mean_reward = float(np.mean(recent_rewards)) if recent_rewards else float("nan")
             pylogger.info(
                 "step={} epsilon={:.3f} replay_size={} mean_reward({})={:.2f} loss={}",
@@ -239,12 +345,6 @@ def _run_training_loop(
                 mean_reward,
                 "n/a" if last_loss is None else f"{last_loss:.4f}",
             )
-            if exp_logger is not None:
-                exp_logger.log_scalar("train/epsilon", epsilon, step=step)
-                exp_logger.log_scalar("train/replay_size", float(len(replay_buffer)), step=step)
-                exp_logger.log_scalar("train/mean_reward", mean_reward, step=step)
-                if last_loss is not None:
-                    exp_logger.log_scalar("train/loss", last_loss, step=step)
 
     pylogger.info(
         "Training finished: steps={} episodes={} replay_size={}",
