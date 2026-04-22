@@ -294,3 +294,34 @@ def test_logging_counters_hook_tracks_total_frames():
 
 def test_logging_hook_set_type_exists():
     assert LoggingHookSet is not None
+
+
+def test_logging_hook_set_run_pre_eval_merges_multiple_eval_hooks():
+    eval_hook_one = MagicMock()
+    eval_hook_two = MagicMock()
+    eval_hook_one.run.return_value = {"eval/deterministic/reward/episode_len_mean": 10.0}
+    eval_hook_two.run.return_value = {"eval/non_deterministic/reward/episode_len_mean": 12.0}
+
+    hook_set = LoggingHookSet(group="agents", frame_skip=1, eval_hooks=[eval_hook_one, eval_hook_two])
+
+    out = hook_set.run_pre_eval()
+
+    eval_hook_one.run.assert_called_once_with(step=0)
+    eval_hook_two.run.assert_called_once_with(step=0)
+    assert out["eval/deterministic/reward/episode_len_mean"] == 10.0
+    assert out["eval/non_deterministic/reward/episode_len_mean"] == 12.0
+
+
+def test_logging_hook_set_registers_and_closes_multiple_eval_hooks():
+    eval_hook_one = MagicMock()
+    eval_hook_two = MagicMock()
+    trainer = MagicMock()
+
+    hook_set = LoggingHookSet(group="agents", frame_skip=1, eval_hooks=[eval_hook_one, eval_hook_two])
+    hook_set.register(trainer)
+    hook_set.close()
+
+    eval_hook_one.register.assert_called_once_with(trainer, name="logging_evaluation_metrics_0")
+    eval_hook_two.register.assert_called_once_with(trainer, name="logging_evaluation_metrics_1")
+    eval_hook_one.close.assert_called_once()
+    eval_hook_two.close.assert_called_once()

@@ -47,4 +47,5 @@ logger:
   backend: wandb
   log_dir: logs
   experiment_name: mogymnasium_ppo
-  wandb_project: xdrl
+  wandb_kwargs:
+    project: xdrl

@@ -47,7 +47,7 @@ def make_env(cfg: DictConfig) -> TransformedEnv:
         max_steps=cfg.env.max_steps,
         device=cfg.env.device,
         seed=cfg.seed,
-        **cfg.env.scenario_kwargs,
+        **cfg.env.get("scenario_kwargs", {}),
     )
     return TransformedEnv(
         base_env,
@@ -63,7 +63,7 @@ def make_eval_env(cfg: DictConfig) -> TransformedEnv:
         max_steps=cfg.eval.max_steps,
         device=cfg.env.device,
         seed=cfg.seed,
-        **cfg.env.scenario_kwargs,
+        **cfg.env.get("scenario_kwargs", {}),
     )
     return TransformedEnv(
         base_env,
@@ -211,7 +211,8 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
         logger_type=cfg.logger.backend,
         logger_name=cfg.logger.log_dir,
         experiment_name=cfg.logger.experiment_name,
-        wandb_kwargs={"project": cfg.logger.wandb_project},
+        wandb_kwargs=OmegaConf.to_container(cfg.logger.get("wandb_kwargs") or {}, resolve=True),
+        trackio_kwargs=OmegaConf.to_container(cfg.logger.get("trackio_kwargs") or {}, resolve=True),
     )
     trainer_logger.log_hparams(OmegaConf.to_container(cfg, resolve=True))
 
@@ -274,30 +275,51 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
             checkpoint_prefix,
         )
 
-    eval_hook = None
+    eval_hooks: list[LoggingEvaluationMetricsHook] = []
     if cfg.eval.enabled:
         pylogger.info(
-            "Evaluation enabled: pre_eval={} interval_frames={} episodes={} render={}",
+            "Evaluation enabled: pre_eval={} interval_frames={} episodes={} render={} deterministic={} non_deterministic={}",
             cfg.eval.pre_eval,
             cfg.eval.interval_frames,
             cfg.eval.episodes,
             cfg.eval.render,
+            cfg.eval.deterministic,
+            cfg.eval.non_deterministic,
         )
-        eval_hook = LoggingEvaluationMetricsHook(
-            policy=actor,
-            environment=make_eval_env(cfg),
-            group=group,
-            interval_frames=cfg.eval.interval_frames,
-            max_steps=cfg.eval.max_steps,
-            deterministic=cfg.eval.deterministic,
-            render=cfg.eval.render,
-            video_fps=cfg.eval.video_fps,
-        )
+        eval_env = make_eval_env(cfg)
+        if cfg.eval.deterministic:
+            eval_hooks.append(
+                LoggingEvaluationMetricsHook(
+                    policy=actor,
+                    environment=eval_env,
+                    group=group,
+                    metric_subgroup="deterministic",
+                    interval_frames=cfg.eval.interval_frames,
+                    max_steps=cfg.eval.max_steps,
+                    deterministic=True,
+                    render=cfg.eval.render,
+                    video_fps=cfg.eval.video_fps,
+                )
+            )
+        if cfg.eval.non_deterministic:
+            eval_hooks.append(
+                LoggingEvaluationMetricsHook(
+                    policy=actor,
+                    environment=eval_env,
+                    group=group,
+                    metric_subgroup="non_deterministic",
+                    interval_frames=cfg.eval.interval_frames,
+                    max_steps=cfg.eval.max_steps,
+                    deterministic=False,
+                    render=cfg.eval.render,
+                    video_fps=cfg.eval.video_fps,
+                )
+            )
 
     logging_hooks = LoggingHookSet(
         group=group,
         frame_skip=cfg.train.frame_skip,
-        eval_hook=eval_hook,
+        eval_hooks=eval_hooks,
     )
     logging_hooks.register(trainer)
 

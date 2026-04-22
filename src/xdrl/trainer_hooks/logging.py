@@ -189,7 +189,7 @@ class LoggingProgressMetricsHook(TrainerHookBase):
 
 
 class LoggingEvaluationMetricsHook(TrainerHookBase):
-    """Runs periodic evaluation and logs metrics under the ``eval/`` namespace."""
+    """Runs periodic evaluation and logs metrics under ``eval/<subgroup>/``."""
 
     def __init__(
         self,
@@ -197,20 +197,24 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
         policy: torch.nn.Module,
         environment,
         group: str,
+        metric_subgroup: str,
         interval_frames: int,
         max_steps: int,
         deterministic: bool,
         render: bool,
         video_fps: int,
+        logger: Any | None = None,
     ) -> None:
         self.policy = policy
         self.environment = environment
         self.group = group
+        self.metric_subgroup = metric_subgroup
         self.interval_frames = interval_frames
         self.max_steps = max_steps
         self.deterministic = deterministic
         self.render = render
         self.video_fps = video_fps
+        self.logger = logger
         self.trainer: Trainer | None = None
 
     def _render_frame(self) -> np.ndarray | None:
@@ -269,33 +273,45 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
             lengths.append(length)
 
         out = {
-            "timers/evaluation_time": float(evaluation_time),
-            "eval/reward/episode_len_mean": float(np.mean(lengths)) if lengths else 0.0,
+            f"timers/eval/{self.metric_subgroup}/evaluation_time": float(evaluation_time),
+            f"eval/{self.metric_subgroup}/reward/episode_len_mean": float(np.mean(lengths)) if lengths else 0.0,
         }
-        out.update(_min_mean_max(f"eval/{self.group}/reward/episode_reward", episode_return))
-        out.update(_min_mean_max("eval/reward/episode_reward", episode_return))
+        out.update(
+            _min_mean_max(
+                f"eval/{self.metric_subgroup}/{self.group}/reward/episode_reward",
+                episode_return,
+            )
+        )
+        out.update(_min_mean_max(f"eval/{self.metric_subgroup}/reward/episode_reward", episode_return))
 
-        if video_frames and self.trainer is not None and self.trainer.logger is not None:
+        target_logger = self.trainer.logger if self.trainer is not None else self.logger
+        if video_frames and target_logger is not None:
             frames = [f for f in video_frames if isinstance(f, np.ndarray)]
             if len(frames) > 1:
                 video = torch.as_tensor(
                     np.transpose(np.stack(frames, axis=0), (0, 3, 1, 2)),
                     dtype=torch.uint8,
                 ).unsqueeze(0)
-                self.trainer.logger.log_video("eval/video", video, step=step, fps=self.video_fps)
+                target_logger.log_video(
+                    f"eval/{self.metric_subgroup}/video",
+                    video,
+                    step=step,
+                    fps=self.video_fps,
+                )
             elif self.render:
                 warnings.warn(
-                    "Evaluation rendering is enabled but no valid frames were captured; eval/video was not logged.",
+                    "Evaluation rendering is enabled but no valid frames were captured; eval/<subgroup>/video was not logged.",
                     stacklevel=2,
                 )
 
         return out
 
     def _log_direct(self, metrics: dict[str, float], step: int) -> None:
-        if self.trainer is None or self.trainer.logger is None:
+        target_logger = self.trainer.logger if self.trainer is not None else self.logger
+        if target_logger is None:
             return
         for key, value in metrics.items():
-            self.trainer.logger.log_scalar(key, float(value), step=step)
+            target_logger.log_scalar(key, float(value), step=step)
 
     def run(self, *, step: int) -> dict[str, float]:
         metrics = self._evaluate_once(step=step)
@@ -324,6 +340,7 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
     def state_dict(self) -> dict[str, Any]:
         return {
             "group": self.group,
+            "metric_subgroup": self.metric_subgroup,
             "interval_frames": self.interval_frames,
             "max_steps": self.max_steps,
             "deterministic": self.deterministic,
@@ -333,6 +350,7 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self.group = state_dict.get("group", self.group)
+        self.metric_subgroup = state_dict.get("metric_subgroup", self.metric_subgroup)
         self.interval_frames = int(state_dict.get("interval_frames", self.interval_frames))
         self.max_steps = int(state_dict.get("max_steps", self.max_steps))
         self.deterministic = bool(state_dict.get("deterministic", self.deterministic))
@@ -348,14 +366,14 @@ class LoggingHookSet:
         *,
         group: str,
         frame_skip: int,
-        eval_hook: LoggingEvaluationMetricsHook | None = None,
+        eval_hooks: list[LoggingEvaluationMetricsHook] | None = None,
     ) -> None:
         self.group = group
         self.collection_hook = LoggingCollectionMetricsHook(group=group)
         self.training_hook = LoggingTrainingMetricsHook(group=group)
         self.counters_hook = LoggingCountersHook(frame_skip=frame_skip)
         self.progress_hook = LoggingProgressMetricsHook(group=group, counters_hook=self.counters_hook)
-        self.eval_hook = eval_hook
+        self.eval_hooks = eval_hooks or []
 
         self._iteration_start: float | None = None
         self._previous_iteration_end: float | None = None
@@ -394,14 +412,15 @@ class LoggingHookSet:
         trainer.register_op("pre_steps_log", self.progress_hook)
 
         trainer.register_op("post_steps_log", self._timers_end)
-        if self.eval_hook is not None:
-            self.eval_hook.register(trainer)
+        for idx, eval_hook in enumerate(self.eval_hooks):
+            eval_hook.register(trainer, name=f"logging_evaluation_metrics_{idx}")
 
     def run_pre_eval(self) -> dict[str, float]:
-        if self.eval_hook is None:
-            return {}
-        return self.eval_hook.run(step=0)
+        out: dict[str, float] = {}
+        for eval_hook in self.eval_hooks:
+            out.update(eval_hook.run(step=0))
+        return out
 
     def close(self) -> None:
-        if self.eval_hook is not None:
-            self.eval_hook.close()
+        for eval_hook in self.eval_hooks:
+            eval_hook.close()

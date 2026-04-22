@@ -14,7 +14,7 @@ import hydra
 import mo_gymnasium  # noqa: F401
 import torch
 from loguru import logger as pylogger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModule
 from tensordict.nn.distributions import NormalParamExtractor
@@ -222,7 +222,8 @@ def make_trainer(cfg: DictConfig, env: GymEnv | SerialEnv) -> PPOTrainer:
         logger_type=cfg.logger.backend,
         logger_name=cfg.logger.log_dir,
         experiment_name=cfg.logger.experiment_name,
-        wandb_kwargs={"project": cfg.logger.wandb_project},
+        wandb_kwargs=OmegaConf.to_container(cfg.logger.get("wandb_kwargs") or {}, resolve=True),
+        trackio_kwargs=OmegaConf.to_container(cfg.logger.get("trackio_kwargs") or {}, resolve=True),
     )
 
     trainer = PPOTrainer(

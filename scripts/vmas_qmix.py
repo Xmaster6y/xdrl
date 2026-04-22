@@ -26,14 +26,15 @@ from torchrl.collectors import Collector
 from torchrl.data import TensorDictReplayBuffer
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from torchrl.data.replay_buffers.storages import LazyTensorStorage
-from torchrl.envs import ExplorationType, RewardSum, TransformedEnv
+from torchrl.envs import RewardSum, TransformedEnv
 from torchrl.envs.libs.vmas import VmasEnv
-from torchrl.envs.utils import set_exploration_type
 from torchrl.modules import EGreedyModule, QValueModule, SafeSequential
 from torchrl.modules.models.multiagent import MultiAgentMLP, QMixer
 from torchrl.objectives import HardUpdate, SoftUpdate, ValueEstimators
 from torchrl.objectives.multiagent.qmixer import QMixerLoss
 from torchrl.record.loggers import get_logger
+
+from xdrl.trainer_hooks import LoggingEvaluationMetricsHook
 
 
 def _as_float(value: torch.Tensor) -> float:
@@ -57,7 +58,23 @@ def make_env(cfg: DictConfig, *, num_envs: int) -> TransformedEnv:
         max_steps=cfg.env.max_steps,
         device=cfg.env.device,
         seed=cfg.seed,
-        **cfg.env.scenario_kwargs,
+        **cfg.env.get("scenario_kwargs", {}),
+    )
+    return TransformedEnv(
+        base_env,
+        RewardSum(in_keys=[base_env.reward_key], out_keys=[("agents", "episode_reward")]),
+    )
+
+
+def make_eval_env(cfg: DictConfig) -> TransformedEnv:
+    base_env = VmasEnv(
+        scenario=cfg.env.scenario,
+        num_envs=cfg.eval.episodes,
+        continuous_actions=False,
+        max_steps=cfg.eval.max_steps,
+        device=cfg.env.device,
+        seed=cfg.seed,
+        **cfg.env.get("scenario_kwargs", {}),
     )
     return TransformedEnv(
         base_env,
@@ -124,85 +141,6 @@ def make_modules(
     return qnet, qnet_explore, mixer
 
 
-def _render_frame(environment: TransformedEnv) -> np.ndarray | None:
-    candidates = [environment, getattr(environment, "base_env", None)]
-    for candidate in candidates:
-        raw_env = getattr(candidate, "_env", None)
-        if raw_env is None or not hasattr(raw_env, "render"):
-            continue
-        try:
-            frame = raw_env.render(mode="rgb_array")
-        except Exception:
-            continue
-        if isinstance(frame, np.ndarray):
-            return frame
-    return None
-
-
-def evaluate(
-    *,
-    qnet: SafeSequential,
-    environment: TransformedEnv,
-    cfg: DictConfig,
-    logger,
-    step: int,
-) -> dict[str, float]:
-    start = time.perf_counter()
-    video_frames: list[np.ndarray] = []
-
-    callback = None
-    if cfg.eval.render:
-
-        def _capture_frame(_env, _td) -> None:
-            frame = _render_frame(environment)
-            if frame is not None:
-                video_frames.append(frame)
-
-        callback = _capture_frame
-
-    exploration_type = ExplorationType.DETERMINISTIC if cfg.eval.deterministic else ExplorationType.RANDOM
-    with torch.no_grad(), set_exploration_type(exploration_type):
-        rollout = environment.rollout(
-            max_steps=cfg.eval.max_steps,
-            policy=qnet,
-            callback=callback,
-            auto_cast_to_device=True,
-            break_when_any_done=False,
-        )
-
-    eval_time = time.perf_counter() - start
-    reward = rollout.get(("next", cfg.model.group, "reward")).float()
-    episode_return = reward.sum(dim=-3).mean(dim=-2).squeeze(-1).reshape(-1)
-
-    done = rollout.get(("next", "done")).squeeze(-1).bool()
-    if done.ndim == 1:
-        done = done.unsqueeze(0)
-    lengths: list[int] = []
-    for trajectory_done in done:
-        done_indices = trajectory_done.nonzero(as_tuple=True)[0]
-        length = int(done_indices[0].item() + 1) if done_indices.numel() else int(trajectory_done.shape[0])
-        lengths.append(length)
-
-    metrics = {
-        "timers/evaluation_time": float(eval_time),
-        "eval/reward/episode_len_mean": float(np.mean(lengths)) if lengths else 0.0,
-    }
-    metrics.update(_min_mean_max("eval/reward/episode_reward", episode_return))
-    metrics.update(_min_mean_max(f"eval/{cfg.model.group}/reward/episode_reward", episode_return))
-
-    for key, value in metrics.items():
-        logger.log_scalar(key, float(value), step=step)
-
-    if cfg.eval.render and len(video_frames) > 1:
-        video = torch.as_tensor(
-            np.transpose(np.stack(video_frames, axis=0), (0, 3, 1, 2)),
-            dtype=torch.uint8,
-        ).unsqueeze(0)
-        logger.log_video("eval/video", video, step=step, fps=cfg.eval.video_fps)
-
-    return metrics
-
-
 def _prepare_batch_for_qmix(batch: TensorDictBase, group: str) -> TensorDictBase:
     reward = batch.get(("next", group, "reward")).mean(dim=-2)
     batch.set(("next", "reward"), reward)
@@ -225,7 +163,7 @@ def main(cfg: DictConfig) -> None:
     )
 
     env = make_env(cfg, num_envs=cfg.env.num_envs)
-    eval_env = make_env(cfg, num_envs=cfg.eval.episodes)
+    eval_env = make_eval_env(cfg)
 
     qnet, qnet_explore, mixer = make_modules(env, cfg)
 
@@ -275,9 +213,52 @@ def main(cfg: DictConfig) -> None:
         logger_type=cfg.logger.backend,
         logger_name=cfg.logger.log_dir,
         experiment_name=cfg.logger.experiment_name,
-        wandb_kwargs={"project": cfg.logger.wandb_project},
+        wandb_kwargs=OmegaConf.to_container(cfg.logger.get("wandb_kwargs") or {}, resolve=True),
+        trackio_kwargs=OmegaConf.to_container(cfg.logger.get("trackio_kwargs") or {}, resolve=True),
     )
     exp_logger.log_hparams(OmegaConf.to_container(cfg, resolve=True))
+
+    eval_hooks: list[LoggingEvaluationMetricsHook] = []
+    if cfg.eval.enabled:
+        pylogger.info(
+            "Evaluation enabled: pre_eval={} interval_frames={} episodes={} render={} deterministic={} non_deterministic={}",
+            cfg.eval.pre_eval,
+            cfg.eval.interval_frames,
+            cfg.eval.episodes,
+            cfg.eval.render,
+            cfg.eval.deterministic,
+            cfg.eval.non_deterministic,
+        )
+        if cfg.eval.deterministic:
+            eval_hooks.append(
+                LoggingEvaluationMetricsHook(
+                    policy=qnet,
+                    environment=eval_env,
+                    group=cfg.model.group,
+                    metric_subgroup="deterministic",
+                    interval_frames=cfg.eval.interval_frames,
+                    max_steps=cfg.eval.max_steps,
+                    deterministic=True,
+                    render=cfg.eval.render,
+                    video_fps=cfg.eval.video_fps,
+                    logger=exp_logger,
+                )
+            )
+        if cfg.eval.non_deterministic:
+            eval_hooks.append(
+                LoggingEvaluationMetricsHook(
+                    policy=qnet,
+                    environment=eval_env,
+                    group=cfg.model.group,
+                    metric_subgroup="non_deterministic",
+                    interval_frames=cfg.eval.interval_frames,
+                    max_steps=cfg.eval.max_steps,
+                    deterministic=False,
+                    render=cfg.eval.render,
+                    video_fps=cfg.eval.video_fps,
+                    logger=exp_logger,
+                )
+            )
 
     total_frames = 0
     total_time = 0.0
@@ -286,7 +267,8 @@ def main(cfg: DictConfig) -> None:
     try:
         if cfg.eval.enabled and cfg.eval.pre_eval:
             pylogger.info("Running pre-training evaluation")
-            evaluate(qnet=qnet, environment=eval_env, cfg=cfg, logger=exp_logger, step=0)
+            for eval_hook in eval_hooks:
+                eval_hook.run(step=0)
 
         for iteration, batch in enumerate(collector, start=1):
             sampling_time = time.perf_counter() - sampling_start
@@ -366,17 +348,16 @@ def main(cfg: DictConfig) -> None:
                     "n/a" if "train/loss" not in metrics else f"{metrics['train/loss']:.4f}",
                 )
 
-            if (
-                cfg.eval.enabled
-                and cfg.eval.interval_frames > 0
-                and total_frames % cfg.eval.interval_frames == 0
-            ):
-                evaluate(qnet=qnet, environment=eval_env, cfg=cfg, logger=exp_logger, step=total_frames)
+            if cfg.eval.enabled and cfg.eval.interval_frames > 0 and total_frames % cfg.eval.interval_frames == 0:
+                for eval_hook in eval_hooks:
+                    eval_hook.run(step=total_frames)
 
             sampling_start = time.perf_counter()
 
         pylogger.info("Training finished after {} frames", total_frames)
     finally:
+        for eval_hook in eval_hooks:
+            eval_hook.close()
         collector.shutdown()
         if not env.is_closed:
             env.close()

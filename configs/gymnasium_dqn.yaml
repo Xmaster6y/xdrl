@@ -33,4 +33,5 @@ logger:
   backend: wandb
   log_dir: logs
   experiment_name: gymnasium_dqn
-  wandb_project: xdrl
+  wandb_kwargs:
+    project: xdrl

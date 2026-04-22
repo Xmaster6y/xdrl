@@ -65,7 +65,8 @@ def make_exp_logger(cfg: DictConfig) -> Logger | None:
         logger_type=backend,
         logger_name=cfg.logger.log_dir,
         experiment_name=cfg.logger.experiment_name,
-        wandb_kwargs={"project": cfg.logger.wandb_project},
+        wandb_kwargs=OmegaConf.to_container(cfg.logger.get("wandb_kwargs") or {}, resolve=True),
+        trackio_kwargs=OmegaConf.to_container(cfg.logger.get("trackio_kwargs") or {}, resolve=True),
     )
 
 

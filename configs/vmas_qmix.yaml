@@ -7,12 +7,11 @@ env:
   num_envs: 60
   max_steps: 100
   device: cpu
-  scenario_kwargs:
-    n_agents: 3
+  scenario_kwargs: {}
 
 collector:
   frames_per_batch: 6000
-  total_frames: 1200000
+  total_frames: 10000000
   no_cuda_sync: false
 
 model:
@@ -23,24 +22,24 @@ model:
   mixing_embed_dim: 32
 
 buffer:
-  memory_size: 100000
+  memory_size: 1000000
   init_random_frames: 0
 
 loss:
-  gamma: 0.99
+  gamma: 0.9
   loss_function: l2
   delay_value: true
   soft_target_update: true
   tau: 0.005
-  hard_target_update_interval: 200
+  hard_target_update_interval: 5
 
 exploration:
-  eps_init: 1.0
-  eps_end: 0.05
-  anneal_frames: 600000
+  eps_init: 0.8
+  eps_end: 0.01
+  anneal_frames: 1000000
 
 optim:
-  lr: 0.0003
+  lr: 0.00005
   clip_grad_norm: true
   max_grad_norm: 5.0
 
@@ -48,17 +47,18 @@ train:
   device: cpu
   storing_device: cpu
   frame_skip: 1
-  minibatch_size: 256
-  optim_steps_per_batch: 64
-  log_interval: 12000
+  minibatch_size: 128
+  optim_steps_per_batch: 1000
+  log_interval: 60000
 
 eval:
   enabled: true
   pre_eval: true
-  interval_frames: 12000
-  episodes: 4
+  interval_frames: 120000
+  episodes: 200
   max_steps: 100
   deterministic: true
+  non_deterministic: true
   render: true
   video_fps: 20
 
@@ -66,4 +66,5 @@ logger:
   backend: wandb
   log_dir: logs
   experiment_name: vmas_qmix
-  wandb_project: xdrl
+  wandb_kwargs:
+    project: xdrl
