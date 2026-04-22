@@ -266,17 +266,39 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
         self.trainer: Trainer | None = None
 
     def _render_frame(self) -> np.ndarray | None:
-        candidates = [self.environment, getattr(self.environment, "base_env", None)]
+        candidates = [
+            self.environment,
+            getattr(self.environment, "base_env", None),
+            getattr(self.environment, "_env", None),
+        ]
+        envs = getattr(self.environment, "envs", None)
+        if isinstance(envs, (list, tuple)):
+            candidates.extend(envs)
+
         for candidate in candidates:
-            raw_env = getattr(candidate, "_env", None)
-            if raw_env is None or not hasattr(raw_env, "render"):
+            if candidate is None or not hasattr(candidate, "render"):
                 continue
+
             try:
-                frame = raw_env.render(mode="rgb_array")
+                frame = candidate.render()
+            except TypeError:
+                try:
+                    frame = candidate.render(mode="rgb_array")
+                except Exception:
+                    continue
             except Exception:
                 continue
+
+            if isinstance(frame, torch.Tensor):
+                frame = frame.detach().cpu().numpy()
             if isinstance(frame, np.ndarray):
                 return frame
+            if isinstance(frame, (list, tuple)):
+                for item in frame:
+                    if isinstance(item, torch.Tensor):
+                        item = item.detach().cpu().numpy()
+                    if isinstance(item, np.ndarray):
+                        return item
         return None
 
     def _evaluate_once(self, step: int) -> dict[str, float]:

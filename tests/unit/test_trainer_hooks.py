@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 import torch
 from tensordict import TensorDict
@@ -14,7 +15,27 @@ from xdrl.trainer_hooks import (
     ReduceLossTensorsHook,
     WeightedSumRewardHook,
 )
-from xdrl.trainer_hooks.logging import LoggingCollectionMetricsHook, LoggingCountersHook, LoggingTrainingMetricsHook
+from xdrl.trainer_hooks.logging import (
+    LoggingCollectionMetricsHook,
+    LoggingCountersHook,
+    LoggingEvaluationMetricsHook,
+    LoggingTrainingMetricsHook,
+)
+
+
+def _evaluation_hook_for_render(environment: object) -> LoggingEvaluationMetricsHook:
+    return LoggingEvaluationMetricsHook(
+        policy=MagicMock(),
+        environment=environment,
+        group="agents",
+        metric_subgroup="deterministic",
+        interval_frames=100,
+        max_steps=25,
+        deterministic=True,
+        render=True,
+        video_fps=20,
+        logger=MagicMock(),
+    )
 
 
 def _multi_agent_gae_hook() -> MultiAgentGAEHook:
@@ -370,3 +391,32 @@ def test_logging_hook_set_registers_and_closes_multiple_eval_hooks():
 
     eval_hook_set.register.assert_called_once_with(trainer)
     eval_hook_set.close.assert_called_once()
+
+
+def test_logging_evaluation_metrics_hook_renders_with_gymnasium_api():
+    frame = np.zeros((8, 8, 3), dtype=np.uint8)
+    env = MagicMock()
+    env.render.return_value = frame
+    hook = _evaluation_hook_for_render(env)
+
+    out = hook._render_frame()
+
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (8, 8, 3)
+    env.render.assert_called_once_with()
+
+
+def test_logging_evaluation_metrics_hook_renders_with_legacy_mode_fallback():
+    frame = np.zeros((8, 8, 3), dtype=np.uint8)
+    env = MagicMock()
+    env.render.side_effect = [TypeError("missing positional argument"), frame]
+    hook = _evaluation_hook_for_render(env)
+
+    out = hook._render_frame()
+
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (8, 8, 3)
+    assert env.render.call_count == 2
+    assert env.render.call_args_list[0].args == ()
+    assert env.render.call_args_list[0].kwargs == {}
+    assert env.render.call_args_list[1].kwargs == {"mode": "rgb_array"}
