@@ -23,7 +23,11 @@ from xdrl.trainer_hooks.logging import (
 )
 
 
-def _evaluation_hook_for_render(environment: object) -> LoggingEvaluationMetricsHook:
+def _evaluation_hook_for_render(
+    environment: object,
+    *,
+    render_kwargs: dict[str, object] | None = None,
+) -> LoggingEvaluationMetricsHook:
     return LoggingEvaluationMetricsHook(
         policy=MagicMock(),
         environment=environment,
@@ -33,6 +37,7 @@ def _evaluation_hook_for_render(environment: object) -> LoggingEvaluationMetrics
         max_steps=25,
         deterministic=True,
         render=True,
+        render_kwargs=render_kwargs,
         video_fps=20,
         logger=MagicMock(),
     )
@@ -211,8 +216,8 @@ def test_weighted_sum_reward_default_weights():
     hook(batch)
 
     scalar = batch.get(("next", "reward"))
-    assert scalar.shape == torch.Size([2, 1])
-    assert scalar.squeeze(-1).tolist() == pytest.approx([6.0, 2.0])
+    assert scalar.shape == torch.Size([2, 1, 1])
+    assert scalar.squeeze(-1).squeeze(-1).tolist() == pytest.approx([6.0, 2.0])
 
 
 def test_weighted_sum_reward_with_custom_weights():
@@ -225,8 +230,8 @@ def test_weighted_sum_reward_with_custom_weights():
     hook(batch)
 
     scalar = batch.get(("next", "reward"))
-    assert scalar.shape == torch.Size([1, 2, 1])
-    torch.testing.assert_close(scalar.squeeze(-1), torch.tensor([[1.8, 3.8]]))
+    assert scalar.shape == torch.Size([1, 2, 1, 1])
+    torch.testing.assert_close(scalar.squeeze(-1).squeeze(-1), torch.tensor([[1.8, 3.8]]))
 
 
 def test_weighted_sum_reward_hook_overwrites_and_preserves_vector_reward():
@@ -245,8 +250,8 @@ def test_weighted_sum_reward_hook_overwrites_and_preserves_vector_reward():
 
     hook(batch)
 
-    assert batch.get(("next", "reward")).shape == torch.Size([2, 1])
-    assert batch.get(("next", "reward")).squeeze(-1).tolist() == pytest.approx([1.5, 3.0])
+    assert batch.get(("next", "reward")).shape == torch.Size([2, 1, 1])
+    assert batch.get(("next", "reward")).squeeze(-1).squeeze(-1).tolist() == pytest.approx([1.5, 3.0])
     assert batch.get(("next", "reward_vector")).shape == torch.Size([2, 2])
 
 
@@ -441,17 +446,32 @@ def test_logging_evaluation_metrics_hook_renders_with_gymnasium_api():
     env.render.assert_called_once_with()
 
 
-def test_logging_evaluation_metrics_hook_renders_with_legacy_mode_fallback():
+def test_logging_evaluation_metrics_hook_renders_with_explicit_render_kwargs():
     frame = np.zeros((8, 8, 3), dtype=np.uint8)
     env = MagicMock()
-    env.render.side_effect = [TypeError("missing positional argument"), frame]
-    hook = _evaluation_hook_for_render(env)
+    env.render.return_value = frame
+    hook = _evaluation_hook_for_render(env, render_kwargs={"mode": "rgb_array"})
 
     out = hook._render_frame()
 
     assert isinstance(out, np.ndarray)
     assert out.shape == (8, 8, 3)
-    assert env.render.call_count == 2
-    assert env.render.call_args_list[0].args == ()
-    assert env.render.call_args_list[0].kwargs == {}
-    assert env.render.call_args_list[1].kwargs == {"mode": "rgb_array"}
+    env.render.assert_called_once_with(mode="rgb_array")
+
+
+def test_logging_evaluation_metrics_hook_render_fails_when_output_is_none():
+    env = MagicMock()
+    env.render.return_value = None
+    hook = _evaluation_hook_for_render(env)
+
+    with pytest.raises(RuntimeError, match="returned None"):
+        hook._render_frame()
+
+
+def test_logging_evaluation_metrics_hook_render_errors_are_not_swallowed():
+    env = MagicMock()
+    env.render.side_effect = TypeError("bad kwargs")
+    hook = _evaluation_hook_for_render(env, render_kwargs={"mode": "rgb_array"})
+
+    with pytest.raises(TypeError, match="bad kwargs"):
+        hook._render_frame()

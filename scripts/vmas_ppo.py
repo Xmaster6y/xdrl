@@ -21,13 +21,15 @@ from torch import nn
 from torch.distributions import Categorical
 
 from torchrl.collectors import Collector
+from torchrl.data import TensorDictReplayBuffer
+from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
+from torchrl.data.replay_buffers.storages import LazyTensorStorage
 from torchrl.envs import RewardSum, TransformedEnv
 from torchrl.envs.libs.vmas import VmasEnv
 from torchrl.modules import ProbabilisticActor, TanhNormal, ValueOperator
 from torchrl.modules.models.multiagent import MultiAgentMLP
 from torchrl.objectives import ClipPPOLoss, ValueEstimators
 from torchrl.trainers.algorithms.ppo import PPOTrainer
-from torchrl.trainers.trainers import BatchSubSampler
 
 from scripts.build import close_experiment_logger, make_experiment_logger
 from xdrl.trainer_hooks import (
@@ -207,6 +209,12 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
 
     optimizer = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr)
 
+    replay_buffer = TensorDictReplayBuffer(
+        storage=LazyTensorStorage(cfg.collector.frames_per_batch, device=cfg.train.storing_device),
+        sampler=SamplerWithoutReplacement(),
+        batch_size=cfg.train.minibatch_size,
+    )
+
     trainer_logger = make_experiment_logger(cfg)
 
     trainer = PPOTrainer(
@@ -224,7 +232,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
         save_trainer_interval=cfg.train.save_trainer_interval,
         log_interval=cfg.logger.log_interval,
         num_epochs=cfg.train.num_epochs,
-        replay_buffer=None,
+        replay_buffer=replay_buffer,
         enable_logging=False,
         add_gae=False,
     )
@@ -245,8 +253,6 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
             group=group,
         ),
     )
-    trainer.register_op(dest="process_optim_batch", op=BatchSubSampler(batch_size=cfg.train.minibatch_size))
-
     policy_checkpoint_interval = int(cfg.train.get("policy_checkpoint_interval", 0))
     if policy_checkpoint_interval > 0:
         checkpoint_dir = cfg.train.get("policy_checkpoint_dir", "checkpoints/policy")
@@ -290,6 +296,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
             deterministic=cfg.eval.deterministic,
             non_deterministic=cfg.eval.non_deterministic,
             render=cfg.eval.render,
+            render_kwargs={"mode": "rgb_array"},
             video_fps=cfg.eval.video_fps,
         )
 

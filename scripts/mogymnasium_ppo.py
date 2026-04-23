@@ -22,6 +22,9 @@ from torch import nn
 from torch.distributions import Categorical
 
 from torchrl.collectors import Collector
+from torchrl.data import TensorDictReplayBuffer
+from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
+from torchrl.data.replay_buffers.storages import LazyTensorStorage
 from torchrl.envs import EnvCreator, GymEnv, RewardSum, SerialEnv, TransformedEnv
 from torchrl.modules import ProbabilisticActor, TanhNormal, ValueOperator
 from torchrl.objectives import ClipPPOLoss
@@ -240,6 +243,12 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv | SerialEnv) -> tuple[PPOT
 
     optimizer = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr)
 
+    replay_buffer = TensorDictReplayBuffer(
+        storage=LazyTensorStorage(cfg.collector.frames_per_batch, device=cfg.train.storing_device),
+        sampler=SamplerWithoutReplacement(),
+        batch_size=cfg.train.minibatch_size,
+    )
+
     trainer_logger = make_experiment_logger(cfg)
 
     trainer = PPOTrainer(
@@ -257,7 +266,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv | SerialEnv) -> tuple[PPOT
         save_trainer_interval=cfg.train.save_trainer_interval,
         log_interval=cfg.logger.log_interval,
         num_epochs=cfg.train.num_epochs,
-        replay_buffer=None,
+        replay_buffer=replay_buffer,
         enable_logging=False,
         add_gae=False,
     )
