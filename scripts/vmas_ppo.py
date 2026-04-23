@@ -238,14 +238,14 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[PPOTrainer, Logg
     )
 
     trainer.register_op(
-        dest="pre_epoch",
+        dest="batch_process",
         op=ExpandSharedNextKeysHook(
             group=group,
             key_names=("done", "terminated"),
         ),
     )
     trainer.register_op(
-        dest="pre_epoch",
+        dest="batch_process",
         op=MultiAgentGAEHook(
             loss_module=loss_module,
             gamma=cfg.loss.gamma,
