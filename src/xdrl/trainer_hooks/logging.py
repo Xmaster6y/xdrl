@@ -185,22 +185,28 @@ class LoggingCollectionMetricsHook(TrainerHookBase):
 
 
 class LoggingTrainingMetricsHook(TrainerHookBase):
-    """Reduces training tensors and mirrors them under the ``train/`` namespace."""
+    """Logs reduced optimization metrics under the ``train/`` namespace."""
 
     def __init__(self, group: str = "agents") -> None:
         self.group = group
 
-    def __call__(self, _sub_batch: TensorDictBase, losses_td: TensorDictBase) -> TensorDictBase:
-        for key, value in list(losses_td.items()):
-            if isinstance(value, torch.Tensor) and value.numel() > 1:
-                value = value.mean()
-                losses_td.set(key, value)
-            if isinstance(value, torch.Tensor):
-                losses_td.set(f"train/{self.group}/{key}", value)
-        return losses_td
+    def __call__(self, _optim_steps: int, average_losses: TensorDictBase | None) -> dict[str, float]:
+        if average_losses is None:
+            return {}
+
+        out: dict[str, float] = {}
+        for key, value in list(average_losses.items()):
+            if not isinstance(value, torch.Tensor):
+                continue
+            scalar = value.mean() if value.numel() > 1 else value.reshape(())
+            average_losses.set(key, scalar)
+            namespaced_key = f"train/{self.group}/{key}"
+            average_losses.set(namespaced_key, scalar)
+            out[namespaced_key] = _as_float(scalar)
+        return out
 
     def register(self, trainer: Trainer, name: str = "logging_training_metrics") -> None:
-        trainer.register_op("process_loss", self)
+        trainer.register_op("post_optim_complete_log", self)
         trainer.register_module(name, self)
 
     def state_dict(self) -> dict[str, Any]:
@@ -637,7 +643,7 @@ class LoggingHookSet:
 
     def register(self, trainer: Trainer) -> None:
         trainer.register_op("batch_process", self._timers_start)
-        trainer.register_op("process_loss", self.training_hook)
+        trainer.register_op("post_optim_complete_log", self.training_hook)
 
         trainer.register_op("pre_steps_log", self.counters_hook)
         trainer.register_op("pre_steps_log", self.collection_hook)

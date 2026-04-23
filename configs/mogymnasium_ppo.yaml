@@ -7,8 +7,8 @@ env:
   device: cpu
 
 collector:
-  frames_per_batch: 2048
-  total_frames: 200000
+  frames_per_batch: 2000
+  total_frames: 1000000
   no_cuda_sync: false
 
 model:

@@ -74,13 +74,13 @@ def make_modules(
         out_keys=[(group, "action_value")],
     )
     value_module = QValueModule(
+        action_space="categorical",
         action_value_key=(group, "action_value"),
         out_keys=[
             env.action_key,
             (group, "action_value"),
             (group, "chosen_action_value"),
         ],
-        spec=env.full_action_spec_unbatched,
     )
     qnet = SafeSequential(actor_module, value_module)
 
@@ -132,6 +132,7 @@ def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[QmixTrainer, Log
         mixer,
         delay_value=cfg.loss.delay_value,
         loss_function=cfg.loss.loss_function,
+        action_space="categorical",
     )
     loss_module.set_keys(
         reward="reward",

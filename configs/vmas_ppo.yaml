@@ -11,7 +11,7 @@ env:
 
 collector:
   frames_per_batch: 60000
-  total_frames: 10000000
+  total_frames: 12000000
   no_cuda_sync: false
 
 model:
