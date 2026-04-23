@@ -195,12 +195,14 @@ class LoggingTrainingMetricsHook(TrainerHookBase):
             return {}
 
         out: dict[str, float] = {}
-        for key, value in average_losses.items():
+        for key, value in list(average_losses.items()):
             if not isinstance(value, torch.Tensor):
                 continue
-            if value.numel() > 1:
-                value = value.mean()
-            out[f"train/{self.group}/{key}"] = _as_float(value)
+            scalar = value.mean() if value.numel() > 1 else value.reshape(())
+            average_losses.set(key, scalar)
+            namespaced_key = f"train/{self.group}/{key}"
+            average_losses.set(namespaced_key, scalar)
+            out[namespaced_key] = _as_float(scalar)
         return out
 
     def register(self, trainer: Trainer, name: str = "logging_training_metrics") -> None:
