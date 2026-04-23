@@ -1,4 +1,4 @@
-"""Train QMIX on VMAS scenarios with a BenchMARL-inspired setup.
+"""Train QMIX on VMAS scenarios with trainer and hooksets.
 
 Examples:
 
@@ -11,14 +11,10 @@ uv run -m scripts.vmas_qmix collector.total_frames=300000
 
 from __future__ import annotations
 
-import time
-
 import hydra
-import numpy as np
 import torch
 from loguru import logger as pylogger
 from omegaconf import DictConfig
-from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModule, TensorDictSequential
 from torch import nn
 
@@ -34,34 +30,16 @@ from torchrl.objectives import HardUpdate, SoftUpdate, ValueEstimators
 from torchrl.objectives.multiagent.qmixer import QMixerLoss
 
 from scripts.build import close_experiment_logger, make_experiment_logger
-from xdrl.trainer_hooks import (
-    LoggingCollectionMetricsHook,
-    LoggingEvaluationHookSet,
-)
+from xdrl.trainer import QmixTrainer
+from xdrl.trainer_hooks import LoggingEvaluationHookSet, LoggingHookSet
 
 
-def make_env(cfg: DictConfig, *, num_envs: int) -> TransformedEnv:
+def make_env(cfg: DictConfig, *, num_envs: int, max_steps: int) -> TransformedEnv:
     base_env = VmasEnv(
         scenario=cfg.env.scenario,
         num_envs=num_envs,
         continuous_actions=False,
-        max_steps=cfg.env.max_steps,
-        device=cfg.env.device,
-        seed=cfg.seed,
-        **cfg.env.get("scenario_kwargs", {}),
-    )
-    return TransformedEnv(
-        base_env,
-        RewardSum(in_keys=[base_env.reward_key], out_keys=[("agents", "episode_reward")]),
-    )
-
-
-def make_eval_env(cfg: DictConfig) -> TransformedEnv:
-    base_env = VmasEnv(
-        scenario=cfg.env.scenario,
-        num_envs=cfg.eval.episodes,
-        continuous_actions=False,
-        max_steps=cfg.eval.max_steps,
+        max_steps=max_steps,
         device=cfg.env.device,
         seed=cfg.seed,
         **cfg.env.get("scenario_kwargs", {}),
@@ -75,24 +53,23 @@ def make_eval_env(cfg: DictConfig) -> TransformedEnv:
 def make_modules(
     env: TransformedEnv,
     cfg: DictConfig,
-) -> tuple[SafeSequential, TensorDictSequential, TensorDictModule]:
+) -> tuple[SafeSequential, TensorDictSequential, EGreedyModule, TensorDictModule]:
     group = cfg.model.group
     obs_dim = env.observation_spec[group, "observation"].shape[-1]
     n_actions = int(env.full_action_spec_unbatched[env.action_key].space.n)
 
-    net = MultiAgentMLP(
-        n_agent_inputs=obs_dim,
-        n_agent_outputs=n_actions,
-        n_agents=env.n_agents,
-        centralised=False,
-        share_params=cfg.model.share_policy_params,
-        device=cfg.train.device,
-        depth=cfg.model.depth,
-        num_cells=cfg.model.hidden_dim,
-        activation_class=nn.Tanh,
-    )
-    module = TensorDictModule(
-        net,
+    actor_module = TensorDictModule(
+        MultiAgentMLP(
+            n_agent_inputs=obs_dim,
+            n_agent_outputs=n_actions,
+            n_agents=env.n_agents,
+            centralised=False,
+            share_params=cfg.model.share_policy_params,
+            device=cfg.train.device,
+            depth=cfg.model.depth,
+            num_cells=cfg.model.hidden_dim,
+            activation_class=nn.Tanh,
+        ),
         in_keys=[(group, "observation")],
         out_keys=[(group, "action_value")],
     )
@@ -105,18 +82,16 @@ def make_modules(
         ],
         spec=env.full_action_spec_unbatched,
     )
-    qnet = SafeSequential(module, value_module)
+    qnet = SafeSequential(actor_module, value_module)
 
-    qnet_explore = TensorDictSequential(
-        qnet,
-        EGreedyModule(
-            eps_init=cfg.exploration.eps_init,
-            eps_end=cfg.exploration.eps_end,
-            annealing_num_steps=cfg.exploration.anneal_frames,
-            action_key=env.action_key,
-            spec=env.full_action_spec_unbatched,
-        ),
+    greedy_module = EGreedyModule(
+        eps_init=cfg.exploration.eps_init,
+        eps_end=cfg.exploration.eps_end,
+        annealing_num_steps=cfg.exploration.anneal_frames,
+        action_key=env.action_key,
+        spec=env.full_action_spec_unbatched,
     )
+    qnet_explore = TensorDictSequential(qnet, greedy_module)
 
     mixer = TensorDictModule(
         module=QMixer(
@@ -128,34 +103,11 @@ def make_modules(
         in_keys=[(group, "chosen_action_value"), (group, "observation")],
         out_keys=["chosen_action_value"],
     )
-    return qnet, qnet_explore, mixer
+    return qnet, qnet_explore, greedy_module, mixer
 
 
-def _prepare_batch_for_qmix(batch: TensorDictBase, group: str) -> TensorDictBase:
-    reward = batch.get(("next", group, "reward")).mean(dim=-2)
-    batch.set(("next", "reward"), reward)
-    return batch
-
-
-@hydra.main(config_path="../configs", config_name="vmas_qmix", version_base=None)
-def main(cfg: DictConfig) -> None:
-    if cfg.env.continuous_actions:
-        msg = "QMIX only supports discrete actions. Set env.continuous_actions=false."
-        raise ValueError(msg)
-
-    torch.manual_seed(cfg.seed)
-
-    pylogger.info(
-        "Starting QMIX on VMAS {} with {} envs and {} total frames",
-        cfg.env.scenario,
-        cfg.env.num_envs,
-        cfg.collector.total_frames,
-    )
-
-    env = make_env(cfg, num_envs=cfg.env.num_envs)
-    eval_env = make_eval_env(cfg)
-
-    qnet, qnet_explore, mixer = make_modules(env, cfg)
+def make_trainer(cfg: DictConfig, env: TransformedEnv) -> tuple[QmixTrainer, LoggingHookSet]:
+    qnet, qnet_explore, greedy_module, mixer = make_modules(env, cfg)
 
     collector = Collector(
         env,
@@ -182,6 +134,9 @@ def main(cfg: DictConfig) -> None:
         loss_function=cfg.loss.loss_function,
     )
     loss_module.set_keys(
+        reward="reward",
+        done="done",
+        terminated="terminated",
         action_value=(cfg.model.group, "action_value"),
         local_value=(cfg.model.group, "chosen_action_value"),
         global_value="chosen_action_value",
@@ -198,13 +153,26 @@ def main(cfg: DictConfig) -> None:
         )
 
     optimizer = torch.optim.Adam(loss_module.parameters(), lr=cfg.optim.lr)
+    trainer_logger = make_experiment_logger(cfg)
 
-    exp_logger = make_experiment_logger(cfg)
-    collection_metrics_hook = LoggingCollectionMetricsHook(
-        group=cfg.logger.metric_group,
-        reward_key=("next", cfg.model.group, "reward"),
-        done_key=("next", "done"),
-        episode_reward_key=("next", cfg.model.group, "episode_reward"),
+    trainer = QmixTrainer(
+        collector=collector,
+        total_frames=cfg.collector.total_frames,
+        frame_skip=cfg.train.frame_skip,
+        optim_steps_per_batch=cfg.train.optim_steps_per_batch,
+        loss_module=loss_module,
+        optimizer=optimizer,
+        logger=trainer_logger,
+        clip_grad_norm=cfg.optim.clip_grad_norm,
+        clip_norm=cfg.optim.max_grad_norm,
+        progress_bar=cfg.train.progress_bar,
+        seed=cfg.seed,
+        save_trainer_interval=cfg.train.save_trainer_interval,
+        log_interval=cfg.logger.log_interval,
+        replay_buffer=replay_buffer,
+        target_net_updater=target_net_updater,
+        greedy_module=greedy_module,
+        group=cfg.model.group,
     )
 
     eval_hook_set = None
@@ -218,7 +186,12 @@ def main(cfg: DictConfig) -> None:
             cfg.eval.deterministic,
             cfg.eval.non_deterministic,
         )
+        eval_env = make_env(cfg, num_envs=cfg.eval.episodes, max_steps=cfg.eval.max_steps)
         eval_hook_set = LoggingEvaluationHookSet(
+            policy=qnet_explore,
+            environment=eval_env,
+            group=cfg.logger.metric_group,
+            reward_key=("next", cfg.model.group, "reward"),
             interval_frames=cfg.eval.interval_frames,
             max_steps=cfg.eval.max_steps,
             deterministic=cfg.eval.deterministic,
@@ -226,113 +199,48 @@ def main(cfg: DictConfig) -> None:
             render=cfg.eval.render,
             render_kwargs={"mode": "rgb_array"},
             video_fps=cfg.eval.video_fps,
-            policy=qnet,
-            environment=eval_env,
-            group=cfg.logger.metric_group,
-            reward_key=("next", cfg.model.group, "reward"),
-            logger=exp_logger,
         )
 
-    total_frames = 0
-    total_time = 0.0
-    sampling_start = time.perf_counter()
+    logging_hooks = LoggingHookSet(
+        group=cfg.logger.metric_group,
+        frame_skip=cfg.train.frame_skip,
+        reward_key=("next", cfg.model.group, "reward"),
+        done_key=("next", "done"),
+        episode_reward_key=("next", cfg.model.group, "episode_reward"),
+        eval_hook_set=eval_hook_set,
+    )
+    logging_hooks.register(trainer)
 
+    return trainer, logging_hooks
+
+
+@hydra.main(config_path="../configs", config_name="vmas_qmix", version_base=None)
+def main(cfg: DictConfig) -> None:
+    if cfg.env.continuous_actions:
+        msg = "QMIX only supports discrete actions. Set env.continuous_actions=false."
+        raise ValueError(msg)
+
+    torch.manual_seed(cfg.seed)
+
+    pylogger.info(
+        "Starting QMIX on VMAS {} with {} envs and {} total frames",
+        cfg.env.scenario,
+        cfg.env.num_envs,
+        cfg.collector.total_frames,
+    )
+
+    env = make_env(cfg, num_envs=cfg.env.num_envs, max_steps=cfg.env.max_steps)
+    trainer, logging_hooks = make_trainer(cfg, env)
     try:
         if cfg.eval.enabled and cfg.eval.pre_eval:
             pylogger.info("Running pre-training evaluation")
-            if eval_hook_set is not None:
-                eval_hook_set.run(step=0)
-
-        for iteration, batch in enumerate(collector, start=1):
-            sampling_time = time.perf_counter() - sampling_start
-
-            current_frames = int(batch.numel() * cfg.train.frame_skip)
-            total_frames += current_frames
-
-            batch = _prepare_batch_for_qmix(batch, cfg.model.group)
-            replay_buffer.extend(batch.reshape(-1))
-
-            training_start = time.perf_counter()
-            loss_values: list[float] = []
-            grad_norm_values: list[float] = []
-
-            if len(replay_buffer) >= cfg.train.minibatch_size:
-                for _ in range(cfg.train.optim_steps_per_batch):
-                    sub_batch = replay_buffer.sample()
-                    loss_td = loss_module(sub_batch)
-                    loss = loss_td["loss"]
-
-                    optimizer.zero_grad()
-                    loss.backward()
-
-                    grad_norm: float | None = None
-                    if cfg.optim.clip_grad_norm:
-                        grad_norm_tensor = torch.nn.utils.clip_grad_norm_(
-                            loss_module.parameters(),
-                            cfg.optim.max_grad_norm,
-                        )
-                        grad_norm = float(grad_norm_tensor.item())
-
-                    optimizer.step()
-                    target_net_updater.step()
-
-                    loss_values.append(float(loss.item()))
-                    if grad_norm is not None:
-                        grad_norm_values.append(grad_norm)
-
-            training_time = time.perf_counter() - training_start
-            iteration_time = sampling_time + training_time
-            total_time += iteration_time
-
-            qnet_explore[1].step(frames=current_frames)
-            collector.update_policy_weights_()
-
-            metrics: dict[str, float] = {
-                "counters/iter": float(iteration),
-                "counters/current_frames": float(current_frames),
-                "counters/total_frames": float(total_frames),
-                "timers/collection_time": float(sampling_time),
-                "timers/training_time": float(training_time),
-                "timers/iteration_time": float(iteration_time),
-                "timers/total_time": float(total_time),
-                "train/epsilon": float(qnet_explore[1].eps.item()),
-            }
-            metrics.update(collection_metrics_hook(batch))
-
-            if loss_values:
-                metrics["train/loss"] = float(np.mean(loss_values))
-            if grad_norm_values:
-                metrics["train/grad_norm"] = float(np.mean(grad_norm_values))
-
-            if exp_logger is not None:
-                for key, value in metrics.items():
-                    exp_logger.log_scalar(key, value, step=total_frames)
-
-            if total_frames % cfg.logger.log_interval == 0:
-                pylogger.info(
-                    "iter={} frames={} replay={} epsilon={:.3f} loss={}",
-                    iteration,
-                    total_frames,
-                    len(replay_buffer),
-                    metrics["train/epsilon"],
-                    "n/a" if "train/loss" not in metrics else f"{metrics['train/loss']:.4f}",
-                )
-
-            if cfg.eval.enabled and cfg.eval.interval_frames > 0 and total_frames % cfg.eval.interval_frames == 0:
-                if eval_hook_set is not None:
-                    eval_hook_set.run(step=total_frames)
-
-            sampling_start = time.perf_counter()
-
-        pylogger.info("Training finished after {} frames", total_frames)
+            logging_hooks.run_pre_eval()
+        trainer.train()
     finally:
-        if eval_hook_set is not None:
-            eval_hook_set.close()
-        collector.shutdown()
+        logging_hooks.close()
+        trainer.collector.shutdown()
         if not env.is_closed:
             env.close()
-        if not eval_env.is_closed:
-            eval_env.close()
         close_experiment_logger(cfg)
 
 

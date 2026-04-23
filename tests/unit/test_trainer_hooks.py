@@ -216,8 +216,8 @@ def test_weighted_sum_reward_default_weights():
     hook(batch)
 
     scalar = batch.get(("next", "reward"))
-    assert scalar.shape == torch.Size([2, 1])
-    assert scalar.squeeze(-1).tolist() == pytest.approx([6.0, 2.0])
+    assert scalar.shape == torch.Size([2, 1, 1])
+    assert scalar.squeeze(-1).squeeze(-1).tolist() == pytest.approx([6.0, 2.0])
 
 
 def test_weighted_sum_reward_with_custom_weights():
@@ -230,8 +230,8 @@ def test_weighted_sum_reward_with_custom_weights():
     hook(batch)
 
     scalar = batch.get(("next", "reward"))
-    assert scalar.shape == torch.Size([1, 2, 1])
-    torch.testing.assert_close(scalar.squeeze(-1), torch.tensor([[1.8, 3.8]]))
+    assert scalar.shape == torch.Size([1, 2, 1, 1])
+    torch.testing.assert_close(scalar.squeeze(-1).squeeze(-1), torch.tensor([[1.8, 3.8]]))
 
 
 def test_weighted_sum_reward_hook_overwrites_and_preserves_vector_reward():
@@ -250,8 +250,8 @@ def test_weighted_sum_reward_hook_overwrites_and_preserves_vector_reward():
 
     hook(batch)
 
-    assert batch.get(("next", "reward")).shape == torch.Size([2, 1])
-    assert batch.get(("next", "reward")).squeeze(-1).tolist() == pytest.approx([1.5, 3.0])
+    assert batch.get(("next", "reward")).shape == torch.Size([2, 1, 1])
+    assert batch.get(("next", "reward")).squeeze(-1).squeeze(-1).tolist() == pytest.approx([1.5, 3.0])
     assert batch.get(("next", "reward_vector")).shape == torch.Size([2, 2])
 
 

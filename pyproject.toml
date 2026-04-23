@@ -67,6 +67,7 @@ default-groups = ["dev", "docs", "scripts"]
 
 [tool.uv.sources]
 tdhook = { git = "https://github.com/Xmaster6y/tdhook" }
+torchrl = { git = "https://github.com/pytorch/rl" }
 
 [tool.ruff]
 line-length = 119
