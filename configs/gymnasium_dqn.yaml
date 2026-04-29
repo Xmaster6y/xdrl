@@ -1,19 +1,49 @@
+defaults:
+  - env@training_env: transformed_env
+  - env@training_env.base_env: gym
+  - transform@training_env.transform: reward_sum
+  - env@eval_env: transformed_env
+  - env@eval_env.base_env: gym
+  - transform@eval_env.transform: reward_sum
+  - collector@collector: sync
+  - replay_buffer@replay_buffer: base
+  - storage@replay_buffer.storage: lazy_tensor
+  - writer@replay_buffer.writer: round_robin
+  - sampler@replay_buffer.sampler: random
+  - trainer@trainer: dqn
+  - optimizer@optimizer: adam
+  - loss@dqn_loss: dqn
+  - target_net_updater@target_net_updater: hard
+  - logger@logger: wandb
+  - xdrl_hook@logging_hooks: logging
+  - xdrl_hook@validation_hook: validation_reward
+  - xdrl_hook@wandb_finish_hook: wandb_finish
+  - _self_
+
 seed: 0
 
 env:
   id: CartPole-v1
-  num_envs: 1
+  observation_dim: 4
+  action_dim: 2
+  train_envs: 1
+  eval_envs: 16
   max_steps: 500
-  device: cpu
-
-collector:
-  frames_per_batch: 200
-  total_frames: 1000000
-  no_cuda_sync: false
 
 model:
   hidden_dim: 256
   depth: 2
+
+collector:
+  create_env_fn: ${training_env}
+  policy: ${models.qvalue_model}
+  frames_per_batch: 200
+  total_frames: 1000000
+  init_random_frames: ${buffer.init_random_frames}
+  device: ${train.device}
+  storing_device: ${train.storing_device}
+  no_cuda_sync: false
+  _partial_: true
 
 buffer:
   memory_size: 50000
@@ -24,19 +54,12 @@ loss:
   loss_function: l2
   delay_value: true
   double_dqn: false
-  soft_target_update: false
-  tau: 0.005
   hard_target_update_interval: 250
 
 exploration:
   eps_init: 1.0
   eps_end: 0.05
   anneal_frames: 25000
-
-optim:
-  lr: 0.0003
-  clip_grad_norm: true
-  max_grad_norm: 10.0
 
 train:
   device: cpu
@@ -45,25 +68,149 @@ train:
   minibatch_size: 256
   optim_steps_per_batch: 128
   progress_bar: true
-  save_trainer_interval: null
+  save_trainer_interval: 25000
+  log_interval: 1000
+  lr: 0.0003
+  max_grad_norm: 10.0
 
 eval:
   enabled: true
   pre_eval: true
   interval_frames: 5000
-  episodes: 16
   max_steps: 500
-  deterministic: true
-  non_deterministic: true
   render: true
   video_fps: 20
 
+networks:
+  qvalue_network:
+    _target_: torchrl.modules.MLP
+    in_features: ${env.observation_dim}
+    out_features: ${env.action_dim}
+    depth: ${model.depth}
+    num_cells: ${model.hidden_dim}
+    activation_class:
+      _target_: torch.nn.ReLU
+      _partial_: true
+    device: ${train.device}
+
+models:
+  qvalue_model:
+    _target_: torchrl.trainers.algorithms.configs.modules._make_qvalue_model
+    network: ${networks.qvalue_network}
+    action_space: categorical
+    in_keys:
+      - observation
+    action_key: action
+    action_value_key: action_value
+    chosen_action_value_key: chosen_action_value
+
+training_env:
+  base_env:
+    env_name: ${env.id}
+    num_envs: ${env.train_envs}
+    device: ${train.device}
+  transform:
+    in_keys:
+      - reward
+    out_keys:
+      - episode_reward
+
+eval_env:
+  base_env:
+    env_name: ${env.id}
+    num_envs: ${env.eval_envs}
+    device: ${train.device}
+    render_mode: rgb_array
+  transform:
+    in_keys:
+      - reward
+    out_keys:
+      - episode_reward
+
+replay_buffer:
+  storage:
+    max_size: ${buffer.memory_size}
+    device: ${train.storing_device}
+    ndim: 1
+  batch_size: ${train.minibatch_size}
+
+dqn_loss:
+  value_network: ${models.qvalue_model}
+  loss_function: ${loss.loss_function}
+  delay_value: ${loss.delay_value}
+  double_dqn: ${loss.double_dqn}
+  action_space: categorical
+  gamma: ${loss.gamma}
+  reward_key: reward
+  done_key: done
+  terminated_key: terminated
+  action_key: action
+  action_value_key: action_value
+  value_key: chosen_action_value
+
+target_net_updater:
+  value_network_update_interval: ${loss.hard_target_update_interval}
+
+optimizer:
+  lr: ${train.lr}
+
 logger:
-  backend: wandb
+  exp_name: gymnasium_dqn_${env.id}
+  project: xdrl
   log_dir: logs
-  experiment_name: gymnasium_dqn
-  log_hparams: true
-  metric_group: agent
-  log_interval: 1000
-  wandb_kwargs:
-    project: xdrl
+
+validation_hook:
+  enabled: ${eval.enabled}
+  pre_eval: ${eval.pre_eval}
+  policy_path: loss_module.value_network
+  environment: ${eval_env}
+  interval_frames: ${eval.interval_frames}
+  frames_per_batch: ${collector.frames_per_batch}
+  record_frames: ${eval.max_steps}
+  exploration_type: DETERMINISTIC
+  log_keys:
+    - [next, reward]
+  log_pbar: false
+
+logging_hooks:
+  group: agent
+  frame_skip: ${train.frame_skip}
+  reward_key: [next, reward]
+  done_key: [next, done]
+  episode_reward_key: [next, episode_reward]
+
+wandb_finish_hook:
+  enabled: true
+
+trainer:
+  collector: ${collector}
+  optimizer: ${optimizer}
+  replay_buffer: ${replay_buffer}
+  target_net_updater: ${target_net_updater}
+  loss_module: ${dqn_loss}
+  value_network: ${models.qvalue_model}
+  logger: ${logger}
+  total_frames: ${collector.total_frames}
+  frame_skip: ${train.frame_skip}
+  clip_grad_norm: true
+  clip_norm: ${train.max_grad_norm}
+  progress_bar: ${train.progress_bar}
+  seed: ${seed}
+  save_trainer_interval: ${train.save_trainer_interval}
+  log_interval: ${train.log_interval}
+  save_trainer_file: null
+  optim_steps_per_batch: ${train.optim_steps_per_batch}
+  eps_init: ${exploration.eps_init}
+  eps_end: ${exploration.eps_end}
+  annealing_num_steps: ${exploration.anneal_frames}
+  reward_key: reward
+  episode_reward_key: episode_reward
+  done_key: done
+  terminated_key: terminated
+  action_key: action
+  observation_key: observation
+  async_collection: false
+  hooks:
+    - ${logging_hooks}
+    - ${validation_hook}
+    - ${wandb_finish_hook}

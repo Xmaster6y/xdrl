@@ -16,7 +16,14 @@ Interpretability for deep RL with `tdhook` for [TorchRL](https://github.com/pyto
 
 ## Getting Started
 
-TBD
+Run trainer experiments through the unified entrypoint:
+
+```bash
+uv run -m scripts.run_experiment --config-name vmas_ppo
+uv run -m scripts.run_experiment --config-name vmas_qmix
+```
+
+All experiment configs are registered from `src/xdrl/configs` Python dataclasses.
 
 ## Config
 

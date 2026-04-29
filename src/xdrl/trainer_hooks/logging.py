@@ -580,7 +580,7 @@ class LoggingEvaluationHookSet:
             hook.close()
 
 
-class LoggingHookSet:
+class LoggingHookSet(TrainerHookBase):
     """Composed logging hooks inspired by BenchMARL defaults."""
 
     def __init__(
@@ -641,7 +641,7 @@ class LoggingHookSet:
             "timers/total_time": float(self._total_time),
         }
 
-    def register(self, trainer: Trainer) -> None:
+    def register(self, trainer: Trainer, name: str = "logging_hooks") -> None:
         trainer.register_op("batch_process", self._timers_start)
         trainer.register_op("post_optim_complete_log", self.training_hook)
 
@@ -652,6 +652,7 @@ class LoggingHookSet:
         trainer.register_op("post_steps_log", self._timers_end)
         if self.eval_hook_set is not None:
             self.eval_hook_set.register(trainer)
+        trainer.register_module(name, self)
 
     def run_pre_eval(self) -> dict[str, float]:
         if self.eval_hook_set is None:
@@ -661,3 +662,54 @@ class LoggingHookSet:
     def close(self) -> None:
         if self.eval_hook_set is not None:
             self.eval_hook_set.close()
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "collection_hook": self.collection_hook.state_dict(),
+            "training_hook": self.training_hook.state_dict(),
+            "counters_hook": self.counters_hook.state_dict(),
+            "progress_hook": self.progress_hook.state_dict(),
+            "iteration_start": self._iteration_start,
+            "previous_iteration_end": self._previous_iteration_end,
+            "collection_time": self._collection_time,
+            "total_time": self._total_time,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.collection_hook.load_state_dict(state_dict.get("collection_hook", {}))
+        self.training_hook.load_state_dict(state_dict.get("training_hook", {}))
+        self.counters_hook.load_state_dict(state_dict.get("counters_hook", {}))
+        self.progress_hook.load_state_dict(state_dict.get("progress_hook", {}))
+        self._iteration_start = state_dict.get("iteration_start", self._iteration_start)
+        self._previous_iteration_end = state_dict.get("previous_iteration_end", self._previous_iteration_end)
+        self._collection_time = float(state_dict.get("collection_time", self._collection_time))
+        self._total_time = float(state_dict.get("total_time", self._total_time))
+
+
+class WandbFinishHook(TrainerHookBase):
+    """Optional shutdown hook for config-driven wandb cleanup."""
+
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = bool(enabled)
+
+    def __call__(self) -> None:
+        if not self.enabled:
+            return
+        try:
+            import wandb
+
+            if wandb.run is not None:
+                wandb.finish()
+        except Exception:
+            pass
+
+    def register(self, trainer: Trainer, name: str = "wandb_finish") -> None:
+        trainer.register_module(name, self)
+        if self.enabled:
+            trainer.register_op("shutdown", self)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"enabled": self.enabled}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.enabled = bool(state_dict.get("enabled", self.enabled))

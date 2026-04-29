@@ -2923,8 +2923,8 @@ wheels = [
 
 [[package]]
 name = "torchrl"
-version = "0.12.0+gb00415ef"
-source = { git = "https://github.com/Xmaster6y/rl?rev=log-losses#b00415ef0311b75f53c8dc031da7392549ad4c74" }
+version = "0.12.0+g4bda64e0"
+source = { git = "https://github.com/Xmaster6y/rl?rev=ma-dqn#4bda64e0c76b8c9458f673a7be1786addf51abe5" }
 dependencies = [
     { name = "cloudpickle" },
     { name = "numpy" },
@@ -3389,7 +3389,7 @@ scripts = [
 [package.metadata]
 requires-dist = [
     { name = "tdhook", git = "https://github.com/Xmaster6y/tdhook" },
-    { name = "torchrl", git = "https://github.com/Xmaster6y/rl?rev=log-losses" },
+    { name = "torchrl", git = "https://github.com/Xmaster6y/rl?rev=ma-dqn" },
 ]
 
 [package.metadata.requires-dev]
