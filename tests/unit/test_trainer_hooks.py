@@ -11,6 +11,7 @@ from xdrl.trainer_hooks import (
     LoggingHookSet,
     PolicyCheckpointHook,
     WandbFinishHook,
+    WandbFlushHook,
 )
 from xdrl.trainer_hooks.logging import (
     LoggingCollectionMetricsHook,
@@ -241,3 +242,31 @@ def test_wandb_finish_hook_can_be_disabled():
 
     trainer.register_module.assert_called_once()
     trainer.register_op.assert_not_called()
+
+
+def test_wandb_flush_hook_commits_pending_wandb_rows():
+    logger = MagicMock()
+    logger._step_registry = {"train/step": 100}
+    trainer = MagicMock()
+    trainer.logger = logger
+    hook = WandbFlushHook()
+
+    hook.register(trainer)
+    hook()
+    hook()
+
+    logger.experiment.log.assert_called_once_with({}, commit=True)
+
+
+def test_wandb_flush_hook_ignores_non_wandb_loggers():
+    logger = MagicMock()
+    logger.experiment.define_metric = None
+    logger._step_registry = {"train/step": 100}
+    trainer = MagicMock()
+    trainer.logger = logger
+    hook = WandbFlushHook()
+
+    hook.register(trainer)
+    hook()
+
+    logger.experiment.log.assert_not_called()

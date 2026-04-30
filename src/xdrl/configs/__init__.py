@@ -8,6 +8,7 @@ from xdrl.configs.hooks import (
     LoggingHookSetConfig,
     PolicyCheckpointHookConfig,
     WandbFinishHookConfig,
+    WandbFlushHookConfig,
 )
 
 _REGISTERED = False
@@ -24,6 +25,7 @@ def register_configs() -> None:
     cs.store(group="xdrl_hook", name="gae", node=GAEHookConfig)
     cs.store(group="xdrl_hook", name="policy_checkpoint", node=PolicyCheckpointHookConfig)
     cs.store(group="xdrl_hook", name="wandb_finish", node=WandbFinishHookConfig)
+    cs.store(group="xdrl_hook", name="wandb_flush", node=WandbFlushHookConfig)
 
     _REGISTERED = True
 

@@ -25,11 +25,13 @@ def test_register_configs_supports_vmas_configs() -> None:
         "xdrl.configs.hooks._make_logging_hook_set",
         "xdrl.configs.hooks._make_log_validation_reward_hook",
         "xdrl.configs.hooks._make_policy_checkpoint_hook",
+        "xdrl.trainer_hooks.logging.WandbFlushHook",
         "xdrl.trainer_hooks.logging.WandbFinishHook",
     ]
     assert [hook._target_ for hook in cfg_vmas_qmix.trainer.hooks] == [
         "xdrl.configs.hooks._make_logging_hook_set",
         "xdrl.configs.hooks._make_log_validation_reward_hook",
+        "xdrl.trainer_hooks.logging.WandbFlushHook",
         "xdrl.trainer_hooks.logging.WandbFinishHook",
     ]
     assert cfg_vmas_qmix.trainer.mixing_strategy == "qmix"
@@ -38,6 +40,10 @@ def test_register_configs_supports_vmas_configs() -> None:
     assert cfg_vmas_qmix.trainer.aggregated_reward_key == "reward"
     assert cfg_vmas_qmix.trainer.aggregated_episode_reward_key == "episode_reward"
     assert cfg_vmas_qmix.mixer_loss.reward_key == "reward"
+    assert cfg_vmas_ppo.trainer.enable_logging is False
+    assert cfg_vmas_ppo.trainer.auto_log_optim_steps is False
+    assert cfg_vmas_qmix.trainer.enable_logging is False
+    assert cfg_vmas_qmix.trainer.auto_log_optim_steps is False
 
 
 def test_register_configs_supports_gymnasium_configs() -> None:
@@ -56,14 +62,20 @@ def test_register_configs_supports_gymnasium_configs() -> None:
     assert [hook._target_ for hook in cfg_gym_dqn.trainer.hooks] == [
         "xdrl.configs.hooks._make_logging_hook_set",
         "xdrl.configs.hooks._make_log_validation_reward_hook",
+        "xdrl.trainer_hooks.logging.WandbFlushHook",
         "xdrl.trainer_hooks.logging.WandbFinishHook",
     ]
     assert [hook._target_ for hook in cfg_mogym_ppo.trainer.hooks] == [
         "xdrl.configs.hooks.GAEHook",
         "xdrl.configs.hooks._make_logging_hook_set",
         "xdrl.configs.hooks._make_log_validation_reward_hook",
+        "xdrl.trainer_hooks.logging.WandbFlushHook",
         "xdrl.trainer_hooks.logging.WandbFinishHook",
     ]
     assert cfg_gym_dqn.training_env.base_env.env_name == "CartPole-v1"
     assert cfg_mogym_ppo.training_scalarize_reward._target_ == "torchrl.envs.transforms.transforms.LineariseRewards"
     assert cfg_mogym_ppo.trainer.add_gae is False
+    assert cfg_gym_dqn.trainer.enable_logging is False
+    assert cfg_gym_dqn.trainer.auto_log_optim_steps is False
+    assert cfg_mogym_ppo.trainer.enable_logging is False
+    assert cfg_mogym_ppo.trainer.auto_log_optim_steps is False

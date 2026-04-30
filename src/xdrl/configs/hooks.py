@@ -349,3 +349,15 @@ class WandbFinishHookConfig(ConfigBase):
 
     def __post_init__(self) -> None:
         pass
+
+
+@dataclass
+class WandbFlushHookConfig(ConfigBase):
+    """Hydra config for flushing pending Weights & Biases scalar rows."""
+
+    enabled: bool = True
+
+    _target_: str = "xdrl.trainer_hooks.logging.WandbFlushHook"
+
+    def __post_init__(self) -> None:
+        pass

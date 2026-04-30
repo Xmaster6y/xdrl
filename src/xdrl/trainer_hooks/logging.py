@@ -755,3 +755,69 @@ class WandbFinishHook(TrainerHookBase):
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self.enabled = bool(state_dict.get("enabled", self.enabled))
+
+
+class WandbFlushHook(TrainerHookBase):
+    """Flush pending W&B scalar rows emitted through TorchRL's scalar logger.
+
+    TorchRL logs scalar metrics one by one, while its W&B logger defaults those
+    calls to ``commit=False`` so metrics for the same step can be grouped. This
+    hook commits the pending row after each trainer iteration and before W&B is
+    finished, which makes metrics appear during long-running jobs.
+    """
+
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = bool(enabled)
+        self.trainer: Trainer | None = None
+        self._last_flushed_steps: tuple[tuple[str, int], ...] = ()
+
+    @staticmethod
+    def _wandb_step_registry(logger: Any) -> tuple[tuple[str, int], ...]:
+        registry = getattr(logger, "_step_registry", None)
+        if not registry:
+            return ()
+        return tuple(sorted((str(key), int(value)) for key, value in registry.items()))
+
+    @staticmethod
+    def _wandb_experiment(logger: Any) -> Any | None:
+        experiment = getattr(logger, "experiment", None)
+        if experiment is None or not callable(getattr(experiment, "log", None)):
+            return None
+        if not callable(getattr(experiment, "define_metric", None)):
+            return None
+        return experiment
+
+    def __call__(self, *_args: Any, **_kwargs: Any) -> None:
+        if not self.enabled or self.trainer is None:
+            return
+
+        logger = getattr(self.trainer, "logger", None)
+        experiment = self._wandb_experiment(logger)
+        if experiment is None:
+            return
+
+        step_registry = self._wandb_step_registry(logger)
+        if not step_registry or step_registry == self._last_flushed_steps:
+            return
+
+        experiment.log({}, commit=True)
+        self._last_flushed_steps = step_registry
+
+    def register(self, trainer: Trainer, name: str = "wandb_flush") -> None:
+        self.trainer = trainer
+        trainer.register_module(name, self)
+        if self.enabled:
+            trainer.register_op("post_steps_log", self)
+            trainer.register_op("shutdown", self)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "last_flushed_steps": self._last_flushed_steps,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.enabled = bool(state_dict.get("enabled", self.enabled))
+        self._last_flushed_steps = tuple(
+            (str(key), int(value)) for key, value in state_dict.get("last_flushed_steps", self._last_flushed_steps)
+        )

@@ -6,6 +6,7 @@ from xdrl.trainer_hooks.logging import (
     LoggingEvaluationMetricsHook,
     LoggingHookSet,
     WandbFinishHook,
+    WandbFlushHook,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "LoggingEvaluationMetricsHook",
     "LoggingHookSet",
     "WandbFinishHook",
+    "WandbFlushHook",
 ]
