@@ -82,7 +82,12 @@ def _prepare_episode_reward(
 
 
 class LoggingCollectionMetricsHook(TrainerHookBase):
-    """Logs BenchMARL-like collection metrics in the ``collection/`` namespace."""
+    """Log collection metrics in the ``collection/`` namespace.
+
+    The hook reads reward, done, and optional episode-reward tensors from a
+    collected TensorDict. Vector-valued rewards can be scalarized with explicit
+    weights, which is useful for MO-Gymnasium and other multi-objective runs.
+    """
 
     def __init__(
         self,
@@ -185,7 +190,12 @@ class LoggingCollectionMetricsHook(TrainerHookBase):
 
 
 class LoggingTrainingMetricsHook(TrainerHookBase):
-    """Logs reduced optimization metrics under the ``train/`` namespace."""
+    """Log reduced optimization metrics under the ``train/`` namespace.
+
+    TorchRL loss modules may emit TensorDict metrics with vector values. This
+    hook reduces tensors to scalars and mirrors them under ``train/<group>/`` so
+    logger dashboards and progress outputs use stable names.
+    """
 
     def __init__(self, group: str = "agents") -> None:
         self.group = group
@@ -217,7 +227,7 @@ class LoggingTrainingMetricsHook(TrainerHookBase):
 
 
 class LoggingCountersHook(TrainerHookBase):
-    """Logs counters in the ``counters/`` namespace."""
+    """Track frame and iteration counters in the ``counters/`` namespace."""
 
     def __init__(self, frame_skip: int = 1) -> None:
         self.frame_skip = frame_skip
@@ -258,7 +268,7 @@ class LoggingCountersHook(TrainerHookBase):
 
 
 class LoggingProgressMetricsHook(TrainerHookBase):
-    """Logs a compact progress-bar view for collection and counters metrics."""
+    """Emit a compact progress-bar view for reward and frame counters."""
 
     def __init__(
         self, *, group: str, counters_hook: LoggingCountersHook, reward_key: tuple[str, ...] | None = None
@@ -295,7 +305,23 @@ class LoggingProgressMetricsHook(TrainerHookBase):
 
 
 class LoggingEvaluationMetricsHook(TrainerHookBase):
-    """Runs periodic evaluation and logs metrics under ``eval/<subgroup>/``."""
+    """Run periodic evaluation and log metrics under ``eval/<subgroup>/``.
+
+    Args:
+        policy: Policy module used during rollout.
+        environment: TorchRL environment with a ``rollout`` method.
+        group: Agent/group namespace used for reward keys.
+        metric_subgroup: Evaluation label such as ``"deterministic"``.
+        interval_frames: Collected-frame interval between evaluations.
+        max_steps: Maximum rollout length.
+        deterministic: Whether to force deterministic exploration.
+        render: Whether to capture rendered frames and log a video.
+        video_fps: Video frame rate passed to the logger.
+        render_kwargs: Optional keyword arguments passed to environment ``render``.
+        reward_key: TensorDict key for rollout rewards.
+        reduce_stats: Whether vector metrics are reduced to min/mean/max.
+        logger: Optional logger used before the hook is registered on a trainer.
+    """
 
     def __init__(
         self,
@@ -513,7 +539,11 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
 
 
 class LoggingEvaluationHookSet:
-    """Composed deterministic/non-deterministic evaluation hooks."""
+    """Compose deterministic and non-deterministic evaluation hooks.
+
+    This wrapper is useful when the same environment and policy should be
+    evaluated with both exploration settings on the same schedule.
+    """
 
     def __init__(
         self,
@@ -581,7 +611,13 @@ class LoggingEvaluationHookSet:
 
 
 class LoggingHookSet(TrainerHookBase):
-    """Composed logging hooks inspired by BenchMARL defaults."""
+    """Compose the default ``xdrl`` logging hooks.
+
+    The hook set registers collection metrics, training metrics, counters,
+    progress metrics, timers, and optional evaluation hooks as a single object.
+    This keeps Hydra configs concise while preserving independently testable
+    hook components.
+    """
 
     def __init__(
         self,
@@ -687,7 +723,11 @@ class LoggingHookSet(TrainerHookBase):
 
 
 class WandbFinishHook(TrainerHookBase):
-    """Optional shutdown hook for config-driven wandb cleanup."""
+    """Optional shutdown hook for config-driven Weights & Biases cleanup.
+
+    The hook intentionally swallows import/runtime errors so offline or disabled
+    W&B runs do not fail trainer shutdown.
+    """
 
     def __init__(self, enabled: bool = True) -> None:
         self.enabled = bool(enabled)

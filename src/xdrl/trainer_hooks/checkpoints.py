@@ -4,18 +4,23 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from torchrl.trainers.trainers import TrainerHookBase
-
-
-def _resolve_attr_path(root: Any, path: str) -> Any:
-    value = root
-    for part in path.split("."):
-        value = getattr(value, part)
-    return value
+from torchrl.trainers.trainers import TrainerHookBase, _resolve_module
 
 
 class PolicyCheckpointHook(TrainerHookBase):
-    """Periodically checkpoint policy weights for offline analysis."""
+    """Periodically checkpoint policy weights for offline analysis.
+
+    Args:
+        directory: Directory where ``.pt`` checkpoint files are written.
+        interval: Number of hook calls between checkpoints. Non-positive values
+            disable file writes while still allowing the hook to be registered.
+        policy: Policy module to checkpoint. If omitted, ``policy_path`` is
+            resolved from the trainer during registration.
+        policy_path: Dotted path to the policy module on the trainer.
+        prefix: Filename prefix used for checkpoint files.
+        destination: TorchRL trainer operation where the hook is registered.
+        meta: Extra metadata persisted in every checkpoint payload.
+    """
 
     def __init__(
         self,
@@ -64,7 +69,7 @@ class PolicyCheckpointHook(TrainerHookBase):
         if self.interval <= 0:
             return
         if self.policy is None and self.policy_path is not None:
-            self.policy = _resolve_attr_path(trainer, self.policy_path)
+            self.policy = _resolve_module(trainer, self.policy_path)
         trainer.register_op(self.destination, self)
 
     def state_dict(self) -> dict[str, Any]:

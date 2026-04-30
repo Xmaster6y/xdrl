@@ -8,13 +8,19 @@ from tensordict import TensorDict
 from tensordict import TensorDictBase
 from torchrl.trainers.algorithms.configs.common import ConfigBase, _normalize_hydra_key
 from torchrl.objectives.value import GAE
-from torchrl.trainers.trainers import LogValidationReward, Trainer, TrainerHookBase
+from torchrl.trainers.trainers import LogValidationReward, Trainer, TrainerHookBase, _resolve_module
 
 from xdrl.trainer_hooks import LoggingHookSet, PolicyCheckpointHook
-from xdrl.trainer_hooks.checkpoints import _resolve_attr_path
 
 
 class ReducedLogValidationReward(LogValidationReward):
+    """Validation reward hook that emits scalar-friendly metrics.
+
+    TorchRL's validation hook can return tensor metrics. This subclass keeps the
+    upstream rollout behavior but reduces multi-valued tensors before logging and
+    optionally resolves the evaluation policy from a trainer attribute path.
+    """
+
     def __init__(
         self,
         *,
@@ -57,7 +63,7 @@ class ReducedLogValidationReward(LogValidationReward):
         if not self.enabled:
             return
         if self.policy_exploration is None and self.policy_path is not None:
-            self.policy_exploration = _resolve_attr_path(trainer, self.policy_path)
+            self.policy_exploration = _resolve_module(trainer, self.policy_path)
         if self.pre_eval:
             trainer.register_op("setup", self._run_pre_eval)
         trainer.register_op("post_steps_log", self)
@@ -84,6 +90,14 @@ class ReducedLogValidationReward(LogValidationReward):
 
 
 class GAEHook(torch.nn.Module, TrainerHookBase):
+    """Compute generalized advantage estimation from a trainer hook.
+
+    The hook resolves the value network from the trainer during registration and
+    applies TorchRL's ``GAE`` module at ``pre_epoch``. This is useful when the
+    trainer's built-in GAE path is disabled or when key names need to be driven
+    from Hydra.
+    """
+
     def __init__(
         self,
         *,
@@ -119,7 +133,7 @@ class GAEHook(torch.nn.Module, TrainerHookBase):
             return self.gae(batch)
 
     def register(self, trainer: Trainer, name: str = "gae_hook") -> None:
-        value_network = _resolve_attr_path(trainer, self.value_network_path)
+        value_network = _resolve_module(trainer, self.value_network_path)
         self.gae = GAE(
             gamma=self.gamma,
             lmbda=self.lmbda,
@@ -147,7 +161,7 @@ def _make_logging_hook_set(
     episode_reward_key: Any | None = None,
     episode_reward_weights: list[float] | None = None,
     reduce_stats: bool | None = None,
-    eval_hook_set: LoggingEvaluationHookSet | None = None,
+    eval_hook_set: Any = None,
 ) -> LoggingHookSet:
     normalized_reward_key = None if reward_key is None else _normalize_hydra_key(reward_key)
     normalized_done_key = _normalize_hydra_key(done_key)
@@ -245,6 +259,8 @@ def _make_log_validation_reward_hook(
 
 @dataclass
 class LoggingHookSetConfig(ConfigBase):
+    """Hydra config for ``xdrl.trainer_hooks.LoggingHookSet``."""
+
     group: str = "agents"
     frame_skip: int = 1
     reward_key: Any | None = None
@@ -262,6 +278,8 @@ class LoggingHookSetConfig(ConfigBase):
 
 @dataclass
 class PolicyCheckpointHookConfig(ConfigBase):
+    """Hydra config for periodic policy checkpointing."""
+
     policy: Any = None
     policy_path: str | None = None
     directory: str = "checkpoints/policy"
@@ -278,6 +296,8 @@ class PolicyCheckpointHookConfig(ConfigBase):
 
 @dataclass
 class GAEHookConfig(ConfigBase):
+    """Hydra config for explicit GAE computation as a trainer hook."""
+
     gamma: float = 0.99
     lmbda: float = 0.95
     value_network_path: str = "loss_module.critic_network"
@@ -297,6 +317,8 @@ class GAEHookConfig(ConfigBase):
 
 @dataclass
 class LogValidationRewardHookConfig(ConfigBase):
+    """Hydra config for scalar-friendly TorchRL validation reward logging."""
+
     policy_exploration: Any = None
     policy_path: str | None = None
     environment: Any = None
@@ -319,6 +341,8 @@ class LogValidationRewardHookConfig(ConfigBase):
 
 @dataclass
 class WandbFinishHookConfig(ConfigBase):
+    """Hydra config for optional W&B shutdown cleanup."""
+
     enabled: bool = True
 
     _target_: str = "xdrl.trainer_hooks.logging.WandbFinishHook"

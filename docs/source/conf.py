@@ -6,7 +6,7 @@ import xdrl
 
 # Project Information
 project = "xdrl"
-copyright = "2025, Yoann Poupart"
+copyright = "2026, Yoann Poupart"
 author = "Yoann Poupart"
 
 
@@ -78,7 +78,7 @@ html_theme_options = {
         },
         {
             "name": "PyPI",
-            "url": "https://pypi.org/project/pydata-sphinx-theme",
+            "url": "https://pypi.org/project/xdrl",
             "icon": "fa-custom fa-pypi",
         },
     ],
