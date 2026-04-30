@@ -107,6 +107,7 @@ models:
 training_env:
   base_env:
     env_name: ${env.id}
+    categorical_action_encoding: true
     num_envs: ${env.train_envs}
     device: ${train.device}
   transform:
@@ -118,6 +119,7 @@ training_env:
 eval_env:
   base_env:
     env_name: ${env.id}
+    categorical_action_encoding: true
     num_envs: ${env.eval_envs}
     device: ${train.device}
     render_mode: rgb_array

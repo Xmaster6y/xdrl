@@ -2967,8 +2967,8 @@ wheels = [
 
 [[package]]
 name = "torchrl"
-version = "0.12.0+g4bda64e0"
-source = { git = "https://github.com/Xmaster6y/rl?rev=ma-dqn#4bda64e0c76b8c9458f673a7be1786addf51abe5" }
+version = "0.12.0+g5b2bc08b"
+source = { git = "https://github.com/Xmaster6y/rl?rev=parity#5b2bc08b034bf228bfa8563629980b939d59b089" }
 dependencies = [
     { name = "cloudpickle" },
     { name = "numpy" },
@@ -3431,7 +3431,7 @@ scripts = [
 [package.metadata]
 requires-dist = [
     { name = "tdhook", git = "https://github.com/Xmaster6y/tdhook" },
-    { name = "torchrl", git = "https://github.com/Xmaster6y/rl?rev=ma-dqn" },
+    { name = "torchrl", git = "https://github.com/Xmaster6y/rl?rev=parity" },
 ]
 
 [package.metadata.requires-dev]

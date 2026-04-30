@@ -1,3 +1,12 @@
+"""
+Run a trainer based experiment.
+
+Example usage:
+```bash
+uv run -m scripts.run_experiment --config-name vmas_qmix
+```
+"""
+
 from __future__ import annotations
 
 import hydra

@@ -11,7 +11,9 @@ from torchrl.envs import ExplorationType
 from torchrl.envs.utils import set_exploration_type
 from torchrl.trainers.trainers import Trainer, TrainerHookBase
 
-from xdrl.trainer_hooks._utils import _as_float
+
+def _as_float(value: torch.Tensor) -> float:
+    return float(value.detach().cpu().item())
 
 
 def _min_mean_max(prefix: str, value: torch.Tensor) -> dict[str, float]:
