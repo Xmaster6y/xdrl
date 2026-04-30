@@ -33,6 +33,11 @@ def test_register_configs_supports_vmas_configs() -> None:
         "xdrl.trainer_hooks.logging.WandbFinishHook",
     ]
     assert cfg_vmas_qmix.trainer.mixing_strategy == "qmix"
+    assert list(cfg_vmas_qmix.trainer.reward_key) == ["agents", "reward"]
+    assert list(cfg_vmas_qmix.trainer.episode_reward_key) == ["agents", "episode_reward"]
+    assert cfg_vmas_qmix.trainer.aggregated_reward_key == "reward"
+    assert cfg_vmas_qmix.trainer.aggregated_episode_reward_key == "episode_reward"
+    assert cfg_vmas_qmix.mixer_loss.reward_key == "reward"
 
 
 def test_register_configs_supports_gymnasium_configs() -> None:
