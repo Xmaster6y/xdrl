@@ -11,7 +11,9 @@ from torchrl.envs import ExplorationType
 from torchrl.envs.utils import set_exploration_type
 from torchrl.trainers.trainers import Trainer, TrainerHookBase
 
-from xdrl.trainer_hooks._utils import _as_float
+
+def _as_float(value: torch.Tensor) -> float:
+    return float(value.detach().cpu().item())
 
 
 def _min_mean_max(prefix: str, value: torch.Tensor) -> dict[str, float]:
@@ -82,7 +84,12 @@ def _prepare_episode_reward(
 
 
 class LoggingCollectionMetricsHook(TrainerHookBase):
-    """Logs BenchMARL-like collection metrics in the ``collection/`` namespace."""
+    """Log collection metrics in the ``collection/`` namespace.
+
+    The hook reads reward, done, and optional episode-reward tensors from a
+    collected TensorDict. Vector-valued rewards can be scalarized with explicit
+    weights, which is useful for MO-Gymnasium and other multi-objective runs.
+    """
 
     def __init__(
         self,
@@ -185,7 +192,12 @@ class LoggingCollectionMetricsHook(TrainerHookBase):
 
 
 class LoggingTrainingMetricsHook(TrainerHookBase):
-    """Logs reduced optimization metrics under the ``train/`` namespace."""
+    """Log reduced optimization metrics under the ``train/`` namespace.
+
+    TorchRL loss modules may emit TensorDict metrics with vector values. This
+    hook reduces tensors to scalars and mirrors them under ``train/<group>/`` so
+    logger dashboards and progress outputs use stable names.
+    """
 
     def __init__(self, group: str = "agents") -> None:
         self.group = group
@@ -217,7 +229,7 @@ class LoggingTrainingMetricsHook(TrainerHookBase):
 
 
 class LoggingCountersHook(TrainerHookBase):
-    """Logs counters in the ``counters/`` namespace."""
+    """Track frame and iteration counters in the ``counters/`` namespace."""
 
     def __init__(self, frame_skip: int = 1) -> None:
         self.frame_skip = frame_skip
@@ -258,7 +270,7 @@ class LoggingCountersHook(TrainerHookBase):
 
 
 class LoggingProgressMetricsHook(TrainerHookBase):
-    """Logs a compact progress-bar view for collection and counters metrics."""
+    """Emit a compact progress-bar view for reward and frame counters."""
 
     def __init__(
         self, *, group: str, counters_hook: LoggingCountersHook, reward_key: tuple[str, ...] | None = None
@@ -295,7 +307,23 @@ class LoggingProgressMetricsHook(TrainerHookBase):
 
 
 class LoggingEvaluationMetricsHook(TrainerHookBase):
-    """Runs periodic evaluation and logs metrics under ``eval/<subgroup>/``."""
+    """Run periodic evaluation and log metrics under ``eval/<subgroup>/``.
+
+    Args:
+        policy: Policy module used during rollout.
+        environment: TorchRL environment with a ``rollout`` method.
+        group: Agent/group namespace used for reward keys.
+        metric_subgroup: Evaluation label such as ``"deterministic"``.
+        interval_frames: Collected-frame interval between evaluations.
+        max_steps: Maximum rollout length.
+        deterministic: Whether to force deterministic exploration.
+        render: Whether to capture rendered frames and log a video.
+        video_fps: Video frame rate passed to the logger.
+        render_kwargs: Optional keyword arguments passed to environment ``render``.
+        reward_key: TensorDict key for rollout rewards.
+        reduce_stats: Whether vector metrics are reduced to min/mean/max.
+        logger: Optional logger used before the hook is registered on a trainer.
+    """
 
     def __init__(
         self,
@@ -513,7 +541,11 @@ class LoggingEvaluationMetricsHook(TrainerHookBase):
 
 
 class LoggingEvaluationHookSet:
-    """Composed deterministic/non-deterministic evaluation hooks."""
+    """Compose deterministic and non-deterministic evaluation hooks.
+
+    This wrapper is useful when the same environment and policy should be
+    evaluated with both exploration settings on the same schedule.
+    """
 
     def __init__(
         self,
@@ -580,8 +612,14 @@ class LoggingEvaluationHookSet:
             hook.close()
 
 
-class LoggingHookSet:
-    """Composed logging hooks inspired by BenchMARL defaults."""
+class LoggingHookSet(TrainerHookBase):
+    """Compose the default ``xdrl`` logging hooks.
+
+    The hook set registers collection metrics, training metrics, counters,
+    progress metrics, timers, and optional evaluation hooks as a single object.
+    This keeps Hydra configs concise while preserving independently testable
+    hook components.
+    """
 
     def __init__(
         self,
@@ -641,7 +679,7 @@ class LoggingHookSet:
             "timers/total_time": float(self._total_time),
         }
 
-    def register(self, trainer: Trainer) -> None:
+    def register(self, trainer: Trainer, name: str = "logging_hooks") -> None:
         trainer.register_op("batch_process", self._timers_start)
         trainer.register_op("post_optim_complete_log", self.training_hook)
 
@@ -652,6 +690,7 @@ class LoggingHookSet:
         trainer.register_op("post_steps_log", self._timers_end)
         if self.eval_hook_set is not None:
             self.eval_hook_set.register(trainer)
+        trainer.register_module(name, self)
 
     def run_pre_eval(self) -> dict[str, float]:
         if self.eval_hook_set is None:
@@ -661,3 +700,124 @@ class LoggingHookSet:
     def close(self) -> None:
         if self.eval_hook_set is not None:
             self.eval_hook_set.close()
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "collection_hook": self.collection_hook.state_dict(),
+            "training_hook": self.training_hook.state_dict(),
+            "counters_hook": self.counters_hook.state_dict(),
+            "progress_hook": self.progress_hook.state_dict(),
+            "iteration_start": self._iteration_start,
+            "previous_iteration_end": self._previous_iteration_end,
+            "collection_time": self._collection_time,
+            "total_time": self._total_time,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.collection_hook.load_state_dict(state_dict.get("collection_hook", {}))
+        self.training_hook.load_state_dict(state_dict.get("training_hook", {}))
+        self.counters_hook.load_state_dict(state_dict.get("counters_hook", {}))
+        self.progress_hook.load_state_dict(state_dict.get("progress_hook", {}))
+        self._iteration_start = state_dict.get("iteration_start", self._iteration_start)
+        self._previous_iteration_end = state_dict.get("previous_iteration_end", self._previous_iteration_end)
+        self._collection_time = float(state_dict.get("collection_time", self._collection_time))
+        self._total_time = float(state_dict.get("total_time", self._total_time))
+
+
+class WandbFinishHook(TrainerHookBase):
+    """Optional shutdown hook for config-driven Weights & Biases cleanup.
+
+    The hook intentionally swallows import/runtime errors so offline or disabled
+    W&B runs do not fail trainer shutdown.
+    """
+
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = bool(enabled)
+
+    def __call__(self) -> None:
+        if not self.enabled:
+            return
+        try:
+            import wandb
+
+            if wandb.run is not None:
+                wandb.finish()
+        except Exception:
+            pass
+
+    def register(self, trainer: Trainer, name: str = "wandb_finish") -> None:
+        trainer.register_module(name, self)
+        if self.enabled:
+            trainer.register_op("shutdown", self)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"enabled": self.enabled}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.enabled = bool(state_dict.get("enabled", self.enabled))
+
+
+class WandbFlushHook(TrainerHookBase):
+    """Flush pending W&B scalar rows emitted through TorchRL's scalar logger.
+
+    TorchRL logs scalar metrics one by one, while its W&B logger defaults those
+    calls to ``commit=False`` so metrics for the same step can be grouped. This
+    hook commits the pending row after each trainer iteration and before W&B is
+    finished, which makes metrics appear during long-running jobs.
+    """
+
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = bool(enabled)
+        self.trainer: Trainer | None = None
+        self._last_flushed_steps: tuple[tuple[str, int], ...] = ()
+
+    @staticmethod
+    def _wandb_step_registry(logger: Any) -> tuple[tuple[str, int], ...]:
+        registry = getattr(logger, "_step_registry", None)
+        if not registry:
+            return ()
+        return tuple(sorted((str(key), int(value)) for key, value in registry.items()))
+
+    @staticmethod
+    def _wandb_experiment(logger: Any) -> Any | None:
+        experiment = getattr(logger, "experiment", None)
+        if experiment is None or not callable(getattr(experiment, "log", None)):
+            return None
+        if not callable(getattr(experiment, "define_metric", None)):
+            return None
+        return experiment
+
+    def __call__(self, *_args: Any, **_kwargs: Any) -> None:
+        if not self.enabled or self.trainer is None:
+            return
+
+        logger = getattr(self.trainer, "logger", None)
+        experiment = self._wandb_experiment(logger)
+        if experiment is None:
+            return
+
+        step_registry = self._wandb_step_registry(logger)
+        if not step_registry or step_registry == self._last_flushed_steps:
+            return
+
+        experiment.log({}, commit=True)
+        self._last_flushed_steps = step_registry
+
+    def register(self, trainer: Trainer, name: str = "wandb_flush") -> None:
+        self.trainer = trainer
+        trainer.register_module(name, self)
+        if self.enabled:
+            trainer.register_op("post_steps_log", self)
+            trainer.register_op("shutdown", self)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "last_flushed_steps": self._last_flushed_steps,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.enabled = bool(state_dict.get("enabled", self.enabled))
+        self._last_flushed_steps = tuple(
+            (str(key), int(value)) for key, value in state_dict.get("last_flushed_steps", self._last_flushed_steps)
+        )

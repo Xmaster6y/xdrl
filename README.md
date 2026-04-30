@@ -16,11 +16,15 @@ Interpretability for deep RL with `tdhook` for [TorchRL](https://github.com/pyto
 
 ## Getting Started
 
-TBD
+TBD.
 
-## Config
+## Development
 
 This project uses [`uv`](https://docs.astral.sh/uv/) to manage python dependencies and run scripts, as well as [`just`](https://github.com/casey/just) to run commands.
+
+## Documentation
+
+See the full documentation at <https://xdrl.readthedocs.io>.
 
 ## License
 `xdrl` is licensed under the MIT License. See [LICENSE](./LICENSE) for details.

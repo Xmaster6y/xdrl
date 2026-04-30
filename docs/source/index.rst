@@ -2,7 +2,7 @@
 :sd_hide_title:
 
 `xdrl`
-=====
+======
 
 .. toctree::
     :maxdepth: 1
@@ -33,9 +33,11 @@
 
         .. div:: sd-fs-4 sd-font-weight-bold sd-my-0 sub-bot image-container
 
-            Explainable RL for TorchRL
+            Hook-first interpretability for TorchRL
 
-        **xdrl** is a package for explaining the decisions of RL agents.
+        **xdrl** provides a small hook foundation for TorchRL trainer loops.
+        Today it covers logging, evaluation, GAE, validation, and policy checkpointing;
+        planned work explores ``tdhook``-powered probing, steering, attribution, and representation analysis.
 
         .. div:: button-group
 
@@ -74,9 +76,9 @@
 
         .. div::
 
-          **Adaptability**
+          **Trainer hooks**
 
-          Directly load networks from TorchRL or ``torch``.
+          Attach metrics, validation, and checkpointing logic at TorchRL trainer lifecycle points.
 
     .. grid-item::
 
@@ -87,6 +89,6 @@
 
         .. div::
 
-          **Interpretability**
+          **RL interpretability**
 
-          Easily compute saliency maps or aggregated statistics using the pre-built Interpretability methods.
+          Planned TensorDict-native probing, steering, attribution, and representation workflows for TorchRL trainers.
