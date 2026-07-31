@@ -18,8 +18,9 @@ from xdrl.types import (
 def test_nested_key_and_vectorised_batch_are_validated_separately() -> None:
     schema = TensorDictSchema(
         keys=(
-            KeySchema(("agents", "observation"), KeyRole.OBSERVATION, KeyPresence.REQUIRED,
-                      UnboundedContinuous(shape=(4,))),
+            KeySchema(
+                ("agents", "observation"), KeyRole.OBSERVATION, KeyPresence.REQUIRED, UnboundedContinuous(shape=(4,))
+            ),
         ),
         batch=BatchSemantics(("env", "agent")),
     )

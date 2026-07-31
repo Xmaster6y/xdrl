@@ -17,8 +17,8 @@ from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 from torchrl.data import TensorSpec
 
+#: A TensorDict key, including nested paths such as ``("agents", "action")``.
 TensorDictKey: TypeAlias = NestedKey
-"""A TensorDict key, including nested paths such as ``("agents", "action")``."""
 
 
 class ModelRole(str, Enum):
@@ -155,8 +155,8 @@ def validate_module(module: ContractModule, tensordict: TensorDictBase) -> Tenso
     return result
 
 
+#: Concrete TorchRL TensorDict module base, re-exported for type annotations.
 TorchRLModule: TypeAlias = TensorDictModuleBase
-"""Concrete TorchRL TensorDict module base, re-exported for type annotations."""
 
 
 def _display_key(key: TensorDictKey) -> str:
@@ -166,6 +166,8 @@ def _display_key(key: TensorDictKey) -> str:
 def _matches_spec(spec: TensorSpec, value: torch.Tensor) -> bool:
     """Check feature shape before applying a TorchRL spec membership constraint."""
     feature_shape = spec.shape
-    if feature_shape and (len(value.shape) < len(feature_shape) or value.shape[-len(feature_shape) :] != feature_shape):
+    if feature_shape and (
+        len(value.shape) < len(feature_shape) or value.shape[-len(feature_shape) :] != feature_shape
+    ):
         return False
     return bool(spec.is_in(value))
