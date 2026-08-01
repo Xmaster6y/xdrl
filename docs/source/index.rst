@@ -11,6 +11,7 @@
     start
     features
     tutorials
+    architecture
     api/index
     About <about>
 
