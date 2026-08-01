@@ -37,3 +37,22 @@ Use runtime validation at public composition boundaries, not in inner training
 loops. TorchRL's probabilistic actors, value operators, loss modules, and
 exploration modules continue to own their native construction and behavior;
 the contract is only an optional annotation and validation boundary.
+
+Interaction contexts
+--------------------
+
+``xdrl.interactions`` records an individual invocation of a TensorDict module
+without changing TorchRL's collector or trainer loops. An
+``InteractionDescriptor`` is the durable, serialisable record: it identifies
+the role, phase, module path, declared I/O schemas, batch semantics,
+exploration/gradient/autocast configuration, and any supplied logical
+step/episode/trajectory identifiers. It contains neither tensors nor modules.
+
+``RuntimeInteractionContext`` is the matching ephemeral wrapper. Its
+construction checks a representative input against the declared input schema;
+``invoke`` checks live inputs and outputs around the actual module call. The
+context restores exploration, gradient/inference, autocast, and a supplied
+hook context even if the invocation raises. Its ordered ``before``, ``after``,
+and ``failure`` records retain only phase, module path, error text, and key
+shapes. An interaction identity must be stable within an execution record;
+event order is increasing within that identity.
