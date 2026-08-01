@@ -49,6 +49,7 @@ class KeySnapshot:
     presence: str
     feature_shape: tuple[int, ...] | None
     spec_type: str | None
+    spec_constraints: Mapping[str, Any] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +69,7 @@ class SchemaSnapshot:
                     presence=entry.presence.value,
                     feature_shape=tuple(entry.spec.shape) if entry.spec is not None else None,
                     spec_type=type(entry.spec).__name__ if entry.spec is not None else None,
+                    spec_constraints=_spec_constraints(entry.spec) if entry.spec is not None else None,
                 )
                 for entry in schema.keys
             ),
@@ -155,6 +157,10 @@ class RuntimeInteractionContext:
     _stack: ExitStack | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if SchemaSnapshot.from_schema(self.input_schema) != self.descriptor.input_schema:
+            raise ValueError("input_schema does not match the interaction descriptor snapshot")
+        if SchemaSnapshot.from_schema(self.output_schema) != self.descriptor.output_schema:
+            raise ValueError("output_schema does not match the interaction descriptor snapshot")
         self.input_schema.validate_inputs(self.representative_input)
 
     def __enter__(self) -> RuntimeInteractionContext:
@@ -164,9 +170,8 @@ class RuntimeInteractionContext:
         try:
             if self.descriptor.exploration_mode is not None:
                 stack.enter_context(set_exploration_type(self.descriptor.exploration_mode))
-            if self.descriptor.inference_mode:
-                stack.enter_context(torch.inference_mode())
-            else:
+            stack.enter_context(torch.inference_mode(self.descriptor.inference_mode))
+            if not self.descriptor.inference_mode:
                 stack.enter_context(torch.set_grad_enabled(self.descriptor.gradient_enabled))
             if self.descriptor.autocast_device_type is not None:
                 stack.enter_context(
@@ -197,9 +202,13 @@ class RuntimeInteractionContext:
         try:
             self.input_schema.validate_inputs(tensordict)
             result = self.module(tensordict)
-            self.output_schema.validate_outputs(result)
         except BaseException as error:
             self._record(LifecycleEventType.FAILURE, tensordict, error)
+            raise
+        try:
+            self.output_schema.validate_outputs(result)
+        except BaseException as error:
+            self._record(LifecycleEventType.FAILURE, result, error)
             raise
         self._record(LifecycleEventType.AFTER, result)
         return result
@@ -231,3 +240,29 @@ def _key_shapes(tensordict: TensorDictBase) -> dict[str, tuple[int, ...] | None]
         path = "/".join(_key_path(key))
         result[path] = tuple(value.shape) if isinstance(value, torch.Tensor) else None
     return result
+
+
+def _spec_constraints(spec: Any) -> dict[str, Any]:
+    """Project TensorSpec validation constraints into JSON-compatible values."""
+    constraints: dict[str, Any] = {}
+    for name in ("dtype", "device", "domain", "low", "high", "n", "nvec", "mask"):
+        if hasattr(spec, name):
+            constraints[name] = _json_value(getattr(spec, name))
+    return constraints
+
+
+def _json_value(value: Any) -> Any:
+    """Convert scalar spec metadata and tensors without retaining tensors."""
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().tolist()
+    if isinstance(value, (torch.dtype, torch.device)):
+        return str(value)
+    if isinstance(value, torch.Size):
+        return tuple(value)
+    if isinstance(value, tuple):
+        return tuple(_json_value(item) for item in value)
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    return value

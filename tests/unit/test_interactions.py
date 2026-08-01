@@ -1,10 +1,13 @@
 from contextlib import contextmanager
+from dataclasses import replace
+import json
 
 import pytest
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.envs.utils import exploration_type
+from torchrl.data import Bounded
 
 from xdrl.interactions import (
     InteractionDescriptor,
@@ -94,9 +97,67 @@ def test_context_restores_execution_and_hook_state_after_exception() -> None:
     assert entered == ["entered", "exited"]
 
 
+def test_context_enables_gradients_inside_outer_inference_mode() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.zeros(1, 2)}, batch_size=[1])
+    descriptor = _descriptor(InteractionPhase.OPTIMISATION, inputs, outputs)
+    descriptor = replace(descriptor, gradient_enabled=True, inference_mode=False)
+    context = RuntimeInteractionContext(descriptor, _policy(), inputs, outputs, batch)
+
+    with torch.inference_mode():
+        with context:
+            assert torch.is_grad_enabled()
+            assert not torch.is_inference_mode_enabled()
+        assert torch.is_inference_mode_enabled()
+
+
+def test_schema_snapshot_preserves_spec_constraints() -> None:
+    lower = TensorDictSchema(
+        (KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED, Bounded(low=-1, high=1, shape=(2,))),),
+        BatchSemantics(("env",)),
+    )
+    wider = TensorDictSchema(
+        (KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED, Bounded(low=-2, high=2, shape=(2,))),),
+        BatchSemantics(("env",)),
+    )
+
+    lower_key = SchemaSnapshot.from_schema(lower).keys[0]
+    wider_key = SchemaSnapshot.from_schema(wider).keys[0]
+    assert lower_key.spec_type == wider_key.spec_type
+    assert lower_key.feature_shape == wider_key.feature_shape
+    assert lower_key.spec_constraints != wider_key.spec_constraints
+    descriptor = InteractionDescriptor(
+        "policy:output:0",
+        ModelRole.ACTOR,
+        InteractionPhase.EVALUATION,
+        "policy.module",
+        SchemaSnapshot.from_schema(lower),
+        SchemaSnapshot.from_schema(wider),
+    )
+    json.dumps(descriptor.to_dict())
+
+
+def test_context_rejects_schema_that_disagrees_with_descriptor() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.zeros(1, 2)}, batch_size=[1])
+    different_outputs = TensorDictSchema(
+        (KeySchema("different_action", KeyRole.ACTION, KeyPresence.PRODUCED),), BatchSemantics(("env",))
+    )
+
+    with pytest.raises(ValueError, match="output_schema does not match"):
+        RuntimeInteractionContext(
+            _descriptor(InteractionPhase.EVALUATION, inputs, outputs), _policy(), inputs, different_outputs, batch
+        )
+
+
 class _FailingPolicy:
     def __call__(self, tensordict: TensorDict) -> TensorDict:
         raise RuntimeError("policy failure")
+
+
+class _InvalidOutputPolicy:
+    def __call__(self, tensordict: TensorDict) -> TensorDict:
+        return TensorDict({"unexpected": torch.zeros(*tensordict.batch_size, 3)}, batch_size=tensordict.batch_size)
 
 
 def test_failure_event_retains_only_diagnostics() -> None:
@@ -116,3 +177,17 @@ def test_failure_event_retains_only_diagnostics() -> None:
     assert failure.key_shapes == {"observation": (2, 2)}
     assert "policy failure" in failure.error
     assert "tensor" not in repr(failure).lower()
+
+
+def test_output_validation_failure_reports_output_shapes() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.zeros(2, 2)}, batch_size=[2])
+    context = RuntimeInteractionContext(
+        _descriptor(InteractionPhase.EVALUATION, inputs, outputs), _InvalidOutputPolicy(), inputs, outputs, batch
+    )
+
+    with context, pytest.raises(Exception, match="missing produced key"):
+        context.invoke(batch)
+
+    assert context.events[-1].kind is LifecycleEventType.FAILURE
+    assert context.events[-1].key_shapes == {"unexpected": (2, 3)}
