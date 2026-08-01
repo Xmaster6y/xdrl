@@ -1,6 +1,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext
+from xdrl.tdhook import TDHookInteractionAdapter
 from xdrl.types import ModelRole, TensorDictSchema
 
 try:
@@ -14,4 +15,5 @@ __all__ = [
     "ModelRole",
     "RuntimeInteractionContext",
     "TensorDictSchema",
+    "TDHookInteractionAdapter",
 ]
