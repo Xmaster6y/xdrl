@@ -15,7 +15,7 @@ import torch
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
-from torchrl.data import TensorSpec
+from torchrl.data import Composite, TensorSpec
 
 #: A TensorDict key, including nested paths such as ``("agents", "action")``.
 TensorDictKey: TypeAlias = NestedKey
@@ -122,9 +122,11 @@ class TensorDictSchema:
                 if entry.presence is KeyPresence.REQUIRED or entry.presence is KeyPresence.PRODUCED:
                     raise SchemaValidationError(f"missing {entry.presence.value} key at {path}")
                 continue
-            if not isinstance(value, torch.Tensor):
-                raise SchemaValidationError(f"key at {path} must contain a torch.Tensor, got {type(value).__name__}")
-            if entry.spec is not None and not _matches_spec(entry.spec, value):
+            if not isinstance(value, (torch.Tensor, TensorDictBase)):
+                raise SchemaValidationError(
+                    f"key at {path} must contain a torch.Tensor or TensorDictBase, got {type(value).__name__}"
+                )
+            if entry.spec is not None and not _matches_spec(entry.spec, value, tensordict.batch_size):
                 raise SchemaValidationError(
                     f"spec mismatch at {path}: got shape={tuple(value.shape)!r}, expected feature shape="
                     f"{tuple(entry.spec.shape)!r} and spec={entry.spec!r}"
@@ -163,11 +165,12 @@ def _display_key(key: TensorDictKey) -> str:
     return "/".join(key) if isinstance(key, tuple) else key
 
 
-def _matches_spec(spec: TensorSpec, value: torch.Tensor) -> bool:
-    """Check feature shape before applying a TorchRL spec membership constraint."""
-    feature_shape = spec.shape
-    if feature_shape and (
-        len(value.shape) < len(feature_shape) or value.shape[-len(feature_shape) :] != feature_shape
-    ):
+def _matches_spec(spec: TensorSpec, value: torch.Tensor | TensorDictBase, batch_size: torch.Size) -> bool:
+    """Check the TensorDict batch prefix and feature shape before spec membership."""
+    if isinstance(value, TensorDictBase):
+        return isinstance(spec, Composite) and bool(spec.is_in(value))
+
+    batch_dims = len(batch_size)
+    if value.shape[:batch_dims] != batch_size or value.shape[batch_dims:] != spec.shape:
         return False
     return bool(spec.is_in(value))

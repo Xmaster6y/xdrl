@@ -1,7 +1,7 @@
 import pytest
 import torch
 from tensordict import TensorDict
-from torchrl.data import UnboundedContinuous
+from torchrl.data import Composite, UnboundedContinuous
 
 from xdrl.types import (
     BatchSemantics,
@@ -49,6 +49,25 @@ def test_validation_reports_spec_and_batch_mismatches() -> None:
         schema.validate_outputs(TensorDict({"value": torch.zeros(2, 1)}, batch_size=[2, 1]))
     with pytest.raises(SchemaValidationError, match="spec mismatch at value"):
         schema.validate_outputs(TensorDict({"value": torch.zeros(2, 2)}, batch_size=[2]))
+    with pytest.raises(SchemaValidationError, match="spec mismatch at value"):
+        schema.validate_outputs(TensorDict({"value": torch.zeros(2, 3, 1)}, batch_size=[2]))
+
+
+def test_composite_spec_validates_a_nested_tensordict_value() -> None:
+    schema = TensorDictSchema(
+        keys=(
+            KeySchema(
+                "agents",
+                KeyRole.OBSERVATION,
+                KeyPresence.REQUIRED,
+                Composite({"observation": UnboundedContinuous(shape=(4,))}),
+            ),
+        ),
+        batch=BatchSemantics(("env",)),
+    )
+    batch = TensorDict({"agents": TensorDict({"observation": torch.zeros(2, 4)}, batch_size=[2])}, batch_size=[2])
+
+    schema.validate_inputs(batch)
 
 
 class _ValueModule:
