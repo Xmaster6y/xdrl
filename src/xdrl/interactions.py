@@ -194,14 +194,14 @@ class RuntimeInteractionContext:
         stack, self._stack = self._stack, None
         return stack.__exit__(*exc_info)
 
-    def invoke(self, tensordict: TensorDictBase) -> TensorDictBase:
+    def invoke(self, tensordict: TensorDictBase, *, module: TensorDictModuleBase | None = None) -> TensorDictBase:
         """Invoke the wrapped module and append before/after/failure events."""
         if self._stack is None:
             raise RuntimeError("invoke must be called inside the interaction context")
         self._record(LifecycleEventType.BEFORE, tensordict)
         try:
             self.input_schema.validate_inputs(tensordict)
-            result = self.module(tensordict)
+            result = (self.module if module is None else module)(tensordict)
         except BaseException as error:
             self._record(LifecycleEventType.FAILURE, tensordict, error)
             raise

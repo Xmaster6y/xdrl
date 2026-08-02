@@ -56,3 +56,17 @@ hook context even if the invocation raises. Its ordered ``before``, ``after``,
 and ``failure`` records retain only phase, module path, error text, and key
 shapes. An interaction identity must be stable within an execution record;
 event order is increasing within that identity.
+
+TDHook instrumentation
+----------------------
+
+``TDHookInteractionAdapter`` binds one ``RuntimeInteractionContext`` to one or
+more raw TDHook context factories. It validates that the selected TensorDict
+input and output keys satisfy both the model and interaction contract, then
+executes through the existing context without changing TensorDict nesting,
+batch shape, dtype, device, or model mode. Semantic aliases in the interaction
+descriptor are exposed as stable TDHook target paths.
+
+Lazy modules must be explicitly materialised with ``adapter.materialize()``
+before ``adapter.activate(factory)``. Compiled, distributed, and remote modules
+are rejected instead of being instrumented with ambiguous semantics.
