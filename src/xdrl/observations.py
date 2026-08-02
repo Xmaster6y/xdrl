@@ -92,6 +92,9 @@ class ObservationRecord:
     phase: str
     module_path: str
     model_role: str
+    model_id: str | None
+    checkpoint_id: str | None
+    exploration_mode: str | None
     kind: ObservationKind
     hook_direction: HookDirection
     target: str
@@ -150,6 +153,9 @@ class ObservationTrace:
             phase=descriptor.phase.value,
             module_path=descriptor.module_path,
             model_role=descriptor.role.value,
+            model_id=descriptor.model_id,
+            checkpoint_id=descriptor.checkpoint_id,
+            exploration_mode=descriptor.exploration_mode,
             kind=kind,
             hook_direction=direction,
             target=target,

@@ -66,7 +66,7 @@ and output keys automatically when supplied to ``RuntimeInteractionContext``;
 hook users can record activations or gradients directly with
 ``observe_tensor``. Each record includes interaction identity, phase, target,
 hook direction, nested key path, batch/time/agent semantics, and
-model/checkpoint-facing descriptor metadata, but ``to_dict`` always excludes
+model/checkpoint identity and exploration metadata, but ``to_dict`` always excludes
 the optional tensor payload.
 
 ``RetentionPolicy`` makes retention explicit: metadata-only is the default;

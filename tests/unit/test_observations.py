@@ -36,7 +36,8 @@ class _Policy(torch.nn.Module):
 def _descriptor(inputs: TensorDictSchema, outputs: TensorDictSchema) -> InteractionDescriptor:
     return InteractionDescriptor(
         "trajectory:4:policy", ModelRole.ACTOR, InteractionPhase.COLLECTION, "policy", SchemaSnapshot.from_schema(inputs),
-        SchemaSnapshot.from_schema(outputs), batch_dimensions=("env",), time_dimension="time", agent_dimension="agent",
+        SchemaSnapshot.from_schema(outputs), model_id="policy-v2", checkpoint_id="checkpoint-4",
+        batch_dimensions=("env",), time_dimension="time", agent_dimension="agent",
         logical_step=4, trajectory_id="trajectory-4", exploration_mode="random",
     )
 
@@ -59,6 +60,9 @@ def test_trace_is_serialisable_and_observation_only_preserves_model_output() -> 
         ObservationKind.VALUE,
     ]
     assert trace.records[1].trajectory_id == "trajectory-4"
+    assert trace.records[1].model_id == "policy-v2"
+    assert trace.records[1].checkpoint_id == "checkpoint-4"
+    assert trace.records[1].exploration_mode == "random"
     assert trace.records[1].payload is None
     json.dumps(trace.records[1].to_dict())
 

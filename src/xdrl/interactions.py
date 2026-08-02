@@ -94,6 +94,8 @@ class InteractionDescriptor:
     module_path: str
     input_schema: SchemaSnapshot
     output_schema: SchemaSnapshot
+    model_id: str | None = None
+    checkpoint_id: str | None = None
     batch_dimensions: tuple[str, ...] = ()
     environment: str | None = None
     time_dimension: str | None = None
