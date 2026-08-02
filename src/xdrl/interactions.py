@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import torch
 from tensordict import TensorDictBase
@@ -19,6 +19,9 @@ from tensordict.nn import TensorDictModuleBase
 from torchrl.envs.utils import set_exploration_type
 
 from xdrl.types import ModelRole, TensorDictKey, TensorDictSchema
+
+if TYPE_CHECKING:
+    from xdrl.observations import ObservationTrace
 
 
 class InteractionPhase(str, Enum):
@@ -153,6 +156,7 @@ class RuntimeInteractionContext:
     output_schema: TensorDictSchema
     representative_input: TensorDictBase
     hook_context_factory: HookContextFactory | None = None
+    observations: ObservationTrace | None = None
     events: list[LifecycleEvent] = field(default_factory=list, init=False)
     _stack: ExitStack | None = field(default=None, init=False, repr=False)
 
@@ -199,6 +203,7 @@ class RuntimeInteractionContext:
         if self._stack is None:
             raise RuntimeError("invoke must be called inside the interaction context")
         self._record(LifecycleEventType.BEFORE, tensordict)
+        self._capture_observations(tensordict, input=True)
         try:
             self.input_schema.validate_inputs(tensordict)
             result = (self.module if module is None else module)(tensordict)
@@ -211,7 +216,22 @@ class RuntimeInteractionContext:
             self._record(LifecycleEventType.FAILURE, result, error)
             raise
         self._record(LifecycleEventType.AFTER, result)
+        self._capture_observations(result, input=False)
         return result
+
+    def _capture_observations(self, tensordict: TensorDictBase, *, input: bool) -> None:
+        if self.observations is None:
+            return
+        from xdrl.observations import HookDirection
+
+        schema = self.input_schema if input else self.output_schema
+        roles = {_key_path(entry.key): entry.role for entry in schema.keys}
+        self.observations.capture_tensordict(
+            self.descriptor,
+            tensordict,
+            direction=HookDirection.INPUT if input else HookDirection.OUTPUT,
+            roles=roles,
+        )
 
     def _record(
         self, kind: LifecycleEventType, tensordict: TensorDictBase, error: BaseException | None = None
