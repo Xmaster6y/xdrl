@@ -17,7 +17,9 @@ from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRol
 
 def _schemas() -> tuple[TensorDictSchema, TensorDictSchema]:
     return (
-        TensorDictSchema((KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),), BatchSemantics(("env",))),
+        TensorDictSchema(
+            (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),), BatchSemantics(("env",))
+        ),
         TensorDictSchema(
             (
                 KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),
@@ -30,15 +32,27 @@ def _schemas() -> tuple[TensorDictSchema, TensorDictSchema]:
 
 class _Policy(torch.nn.Module):
     def forward(self, tensordict: TensorDict) -> TensorDict:
-        return tensordict.set("action", tensordict["observation"] + 1).set("value", tensordict["observation"].sum(-1, keepdim=True))
+        return tensordict.set("action", tensordict["observation"] + 1).set(
+            "value", tensordict["observation"].sum(-1, keepdim=True)
+        )
 
 
 def _descriptor(inputs: TensorDictSchema, outputs: TensorDictSchema) -> InteractionDescriptor:
     return InteractionDescriptor(
-        "trajectory:4:policy", ModelRole.ACTOR, InteractionPhase.COLLECTION, "policy", SchemaSnapshot.from_schema(inputs),
-        SchemaSnapshot.from_schema(outputs), model_id="policy-v2", checkpoint_id="checkpoint-4",
-        batch_dimensions=("env",), time_dimension="time", agent_dimension="agent",
-        logical_step=4, trajectory_id="trajectory-4", exploration_mode="random",
+        "trajectory:4:policy",
+        ModelRole.ACTOR,
+        InteractionPhase.COLLECTION,
+        "policy",
+        SchemaSnapshot.from_schema(inputs),
+        SchemaSnapshot.from_schema(outputs),
+        model_id="policy-v2",
+        checkpoint_id="checkpoint-4",
+        batch_dimensions=("env",),
+        time_dimension="time",
+        agent_dimension="agent",
+        logical_step=4,
+        trajectory_id="trajectory-4",
+        exploration_mode="random",
     )
 
 
@@ -48,7 +62,9 @@ def test_trace_is_serialisable_and_observation_only_preserves_model_output() -> 
     model = _Policy()
     expected = model(batch.clone())
     trace = ObservationTrace()
-    context = RuntimeInteractionContext(_descriptor(inputs, outputs), model, inputs, outputs, batch, observations=trace)
+    context = RuntimeInteractionContext(
+        _descriptor(inputs, outputs), model, inputs, outputs, batch, observations=trace
+    )
 
     with context:
         actual = context.invoke(batch.clone())
@@ -72,7 +88,9 @@ def test_retention_detaches_reduces_and_bounds_records() -> None:
     trace = ObservationTrace(RetentionPolicy(tensor=TensorRetention.CPU, reduction="mean", max_records=1))
     descriptor = _descriptor(inputs, outputs)
     source = torch.tensor([[1.0, 3.0], [5.0, 7.0]], requires_grad=True)
-    first = trace.observe_tensor(descriptor, source, kind=ObservationKind.ACTIVATION, target="encoder", direction=HookDirection.OUTPUT)
+    first = trace.observe_tensor(
+        descriptor, source, kind=ObservationKind.ACTIVATION, target="encoder", direction=HookDirection.OUTPUT
+    )
     assert first is not None and first.payload is not None
     assert not first.payload.requires_grad
     assert first.payload.device.type == "cpu"
