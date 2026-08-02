@@ -186,11 +186,12 @@ def _tdhook_path(path: str) -> str:
 
 
 def _has_uninitialized_parameters(module: torch.nn.Module) -> bool:
-    return any(isinstance(parameter, torch.nn.parameter.UninitializedParameter) for parameter in module.parameters())
+    uninitialized = (torch.nn.parameter.UninitializedParameter, torch.nn.parameter.UninitializedBuffer)
+    return any(isinstance(value, uninitialized) for value in (*module.parameters(), *module.buffers()))
 
 
 def _reject_unsupported_module(module: TensorDictModuleBase) -> None:
-    if hasattr(module, "_orig_mod"):
+    if any(hasattr(child, "_orig_mod") for child in module.modules()):
         raise NotImplementedError("torch.compile modules are not supported by the TDHook adapter")
     distributed_types = (torch.nn.parallel.DistributedDataParallel, torch.nn.parallel.DataParallel)
     if any(isinstance(child, distributed_types) for child in module.modules()):

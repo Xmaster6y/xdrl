@@ -85,6 +85,30 @@ def test_lazy_modules_require_explicit_materialisation() -> None:
         adapter.invoke(interaction.representative_input.clone())
 
 
+def test_lazy_buffers_require_explicit_materialisation() -> None:
+    policy = TensorDictModule(
+        torch.nn.LazyBatchNorm1d(affine=False),
+        in_keys=[("agents", "observation")],
+        out_keys=[("agents", "action")],
+    )
+    interaction = _interaction(policy)
+    adapter = TDHookInteractionAdapter(interaction)
+    factory = ActivationCaching(r"module")
+
+    with pytest.raises(RuntimeError, match="call materialize"):
+        adapter.activate(factory)
+    adapter.materialize()
+    with adapter.activate(factory):
+        adapter.invoke(interaction.representative_input.clone())
+
+
+def test_adapter_rejects_compiled_descendants() -> None:
+    policy = _policy()
+    policy.module._orig_mod = policy.module
+    with pytest.raises(NotImplementedError, match="torch.compile"):
+        TDHookInteractionAdapter(_interaction(policy))
+
+
 def test_adapter_removes_hooks_when_invocation_fails() -> None:
     policy = _policy()
     adapter = TDHookInteractionAdapter(_interaction(policy))
