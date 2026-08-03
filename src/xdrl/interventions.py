@@ -151,10 +151,16 @@ class InterventionController:
                 continue
             if intervention.target is not InterventionTarget.TENSORDICT:
                 continue
-            schema = interaction.input_schema if intervention.timing is InterventionTiming.INPUT else interaction.output_schema
+            schema = (
+                interaction.input_schema
+                if intervention.timing is InterventionTiming.INPUT
+                else interaction.output_schema
+            )
             _validate_key(intervention, schema)
 
-    def apply(self, interaction: "RuntimeInteractionContext", tensordict: TensorDictBase, timing: InterventionTiming) -> TensorDictBase:
+    def apply(
+        self, interaction: "RuntimeInteractionContext", tensordict: TensorDictBase, timing: InterventionTiming
+    ) -> TensorDictBase:
         schema = interaction.input_schema if timing is InterventionTiming.INPUT else interaction.output_schema
         for intervention in self.interventions:
             if intervention.target is not InterventionTarget.TENSORDICT or intervention.timing is not timing:
@@ -164,7 +170,9 @@ class InterventionController:
             assert intervention.key is not None
             value = tensordict.get(intervention.key)
             if not isinstance(value, torch.Tensor):
-                raise InterventionValidationError(f"{intervention.identifier}: key {_display_key(intervention.key)} is not a tensor")
+                raise InterventionValidationError(
+                    f"{intervention.identifier}: key {_display_key(intervention.key)} is not a tensor"
+                )
             tensordict.set(intervention.key, intervention.edit_tensor(value, label=_display_key(intervention.key)))
             # Revalidate immediately: this includes feature shape, batch semantics,
             # device/dtype membership, and any TensorSpec constraint.
@@ -226,7 +234,9 @@ class TDHookInterventionFactory(HookingContextFactory):
         self._interventions = tuple(interventions)
         for intervention in self._interventions:
             if intervention.target is InterventionTarget.TENSORDICT:
-                raise InterventionValidationError("TDHookInterventionFactory accepts activation or gradient interventions only")
+                raise InterventionValidationError(
+                    "TDHookInterventionFactory accepts activation or gradient interventions only"
+                )
             if intervention.applies_to(interaction.descriptor):
                 assert intervention.module_path is not None
                 try:
@@ -247,8 +257,16 @@ class TDHookInterventionFactory(HookingContextFactory):
             def callback(
                 *, intervention: Intervention = intervention, direction: str = direction, **kwargs: Any
             ) -> torch.Tensor | tuple[torch.Tensor, ...]:
-                container = kwargs["output"] if direction == "fwd" else (
-                    kwargs["args"] if direction == "fwd_pre" else kwargs["grad_input"] if direction == "bwd" else kwargs["grad_output"]
+                container = (
+                    kwargs["output"]
+                    if direction == "fwd"
+                    else (
+                        kwargs["args"]
+                        if direction == "fwd_pre"
+                        else kwargs["grad_input"]
+                        if direction == "bwd"
+                        else kwargs["grad_output"]
+                    )
                 )
                 value = container if isinstance(container, torch.Tensor) else container[-1]
                 if not isinstance(value, torch.Tensor):
