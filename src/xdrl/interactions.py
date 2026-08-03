@@ -210,11 +210,11 @@ class RuntimeInteractionContext:
         if self._stack is None:
             raise RuntimeError("invoke must be called inside the interaction context")
         self._record(LifecycleEventType.BEFORE, tensordict)
-        self._capture_observations(tensordict, input=True)
         try:
             self.input_schema.validate_inputs(tensordict)
             if self.interventions is not None:
                 tensordict = self.interventions.apply(self, tensordict, InterventionTiming.INPUT)
+            self._capture_observations(tensordict, input=True)
             result = (self.module if module is None else module)(tensordict)
         except BaseException as error:
             self._record(LifecycleEventType.FAILURE, tensordict, error)

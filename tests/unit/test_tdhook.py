@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -158,6 +160,31 @@ def test_gradient_intervention_requires_an_autograd_enabled_interaction() -> Non
 
     with pytest.raises(InterventionValidationError, match="gradient_enabled=True"):
         TDHookInterventionFactory(interaction, (intervention,))
+
+
+@pytest.mark.parametrize("timing", [InterventionTiming.INPUT, InterventionTiming.OUTPUT])
+def test_gradient_interventions_replace_backpropagated_input_gradients(timing: InterventionTiming) -> None:
+    policy = _policy()
+    interaction = _interaction(policy)
+    interaction.descriptor = replace(interaction.descriptor, gradient_enabled=True)
+    batch = interaction.representative_input.clone()
+    observation = batch.get(("agents", "observation")).requires_grad_()
+    batch.set(("agents", "observation"), observation)
+    intervention = Intervention(
+        f"zero-gradient-{timing.value}",
+        InterventionTarget.GRADIENT,
+        timing,
+        transform=torch.zeros_like,
+        module_path="module",
+    )
+    adapter = TDHookInteractionAdapter(interaction)
+    factory = TDHookInterventionFactory(interaction, (intervention,))
+
+    with adapter.activate(factory) as active:
+        active.invoke(batch).get(("agents", "action")).sum().backward()
+
+    assert observation.grad is not None
+    assert torch.equal(observation.grad, torch.zeros_like(observation))
 
 
 def test_intervention_paths_are_resolved_against_the_adapter_selection() -> None:

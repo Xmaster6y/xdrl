@@ -24,6 +24,7 @@ from xdrl.interventions import (
     InterventionValidationError,
     run_paired,
 )
+from xdrl.observations import ObservationTrace, RetentionPolicy, TensorRetention
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
 
@@ -324,3 +325,30 @@ def test_invalid_tensordict_interventions_fail_at_the_contract_boundary() -> Non
                 )
             ),
         )
+
+
+def test_input_observations_capture_the_intervened_value() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.ones(1, 2)}, batch_size=[1])
+    intervention = Intervention(
+        "zero-input",
+        InterventionTarget.TENSORDICT,
+        InterventionTiming.INPUT,
+        transform=torch.zeros_like,
+        key="observation",
+    )
+    trace = ObservationTrace(RetentionPolicy(tensor=TensorRetention.DETACHED))
+    context = RuntimeInteractionContext(
+        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+        _policy(),
+        inputs,
+        outputs,
+        batch,
+        observations=trace,
+        interventions=InterventionController((intervention,)),
+    )
+
+    with context:
+        context.invoke(batch.clone())
+
+    assert torch.equal(trace.records[0].payload, torch.zeros(1, 2))
