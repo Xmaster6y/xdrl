@@ -12,7 +12,6 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
-    environment: ci
     timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
@@ -37,12 +36,16 @@ jobs:
       run: |
         uv run pytest tests --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=50 \
           --junitxml=test-results.xml -s -v
-    - name: Upload test artifacts
-      if: ${{ matrix.python-version == '3.11' && always() }}
-      uses: actions/upload-artifact@v4
+    - name: Upload coverage reports to Codecov
+      if: matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v5
       with:
-        name: test-results-python-3.11
-        path: |
-          coverage.xml
-          test-results.xml
-        if-no-files-found: error
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: coverage.xml
+        fail_ci_if_error: true
+    - name: Upload test results to Codecov
+      if: matrix.python-version == '3.11' && ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
