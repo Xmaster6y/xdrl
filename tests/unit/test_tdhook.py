@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -5,6 +7,13 @@ from tensordict.nn import TensorDictModule
 from tdhook.latent.activation_caching import ActivationCaching
 
 from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext, SchemaSnapshot
+from xdrl.interventions import (
+    Intervention,
+    InterventionTarget,
+    InterventionTiming,
+    InterventionValidationError,
+    TDHookInterventionFactory,
+)
 from xdrl.tdhook import TDHookInteractionAdapter
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
@@ -117,3 +126,110 @@ def test_adapter_removes_hooks_when_invocation_fails() -> None:
         with adapter.activate(factory):
             raise RuntimeError("boom")
     assert not policy.module._forward_hooks
+
+
+def test_tdhook_activation_intervention_changes_output_and_removes_its_hook() -> None:
+    policy = _policy()
+    interaction = _interaction(policy)
+    intervention = Intervention(
+        "zero-head",
+        InterventionTarget.ACTIVATION,
+        InterventionTiming.OUTPUT,
+        transform=torch.zeros_like,
+        module_path="module",
+    )
+    adapter = TDHookInteractionAdapter(interaction)
+    factory = TDHookInterventionFactory(interaction, (intervention,))
+
+    with adapter.activate(factory) as active:
+        result = active.invoke(interaction.representative_input.clone())
+        assert torch.equal(result.get(("agents", "action")), torch.zeros(3, 2, 1))
+
+    assert not policy.module._forward_hooks
+
+
+def test_gradient_intervention_requires_an_autograd_enabled_interaction() -> None:
+    interaction = _interaction(_policy())
+    intervention = Intervention(
+        "zero-gradient",
+        InterventionTarget.GRADIENT,
+        InterventionTiming.INPUT,
+        transform=torch.zeros_like,
+        module_path="module",
+    )
+
+    with pytest.raises(InterventionValidationError, match="gradient_enabled=True"):
+        TDHookInterventionFactory(interaction, (intervention,))
+
+
+@pytest.mark.parametrize("timing", [InterventionTiming.INPUT, InterventionTiming.OUTPUT])
+def test_gradient_interventions_replace_backpropagated_input_gradients(timing: InterventionTiming) -> None:
+    policy = _policy()
+    interaction = _interaction(policy)
+    interaction.descriptor = replace(interaction.descriptor, gradient_enabled=True)
+    batch = interaction.representative_input.clone()
+    observation = batch.get(("agents", "observation")).requires_grad_()
+    batch.set(("agents", "observation"), observation)
+    intervention = Intervention(
+        f"zero-gradient-{timing.value}",
+        InterventionTarget.GRADIENT,
+        timing,
+        transform=torch.zeros_like,
+        module_path="module",
+    )
+    adapter = TDHookInteractionAdapter(interaction)
+    factory = TDHookInterventionFactory(interaction, (intervention,))
+
+    with adapter.activate(factory) as active:
+        active.invoke(batch).get(("agents", "action")).sum().backward()
+
+    assert observation.grad is not None
+    assert torch.equal(observation.grad, torch.zeros_like(observation))
+
+
+def test_intervention_paths_are_resolved_against_the_adapter_selection() -> None:
+    interaction = _interaction(_policy())
+    selected = TensorDictModule(
+        torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1)),
+        in_keys=[("agents", "observation")],
+        out_keys=[("agents", "action")],
+    )
+    intervention = Intervention(
+        "selected-head",
+        InterventionTarget.ACTIVATION,
+        InterventionTiming.OUTPUT,
+        transform=torch.zeros_like,
+        module_path="module.1",
+    )
+    adapter = TDHookInteractionAdapter(interaction, selected_module=selected)
+    factory = TDHookInterventionFactory(interaction, (intervention,))
+
+    with adapter.activate(factory) as active:
+        result = active.invoke(interaction.representative_input.clone())
+        assert torch.equal(result.get(("agents", "action")), torch.zeros(3, 2, 1))
+
+
+class _TwoTensorOutputs(torch.nn.Module):
+    def forward(self, value: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return value[..., :1], value[..., :1]
+
+
+def test_tdhook_intervention_rejects_ambiguous_multi_tensor_outputs() -> None:
+    policy = TensorDictModule(
+        _TwoTensorOutputs(),
+        in_keys=[("agents", "observation")],
+        out_keys=[("agents", "action"), ("agents", "auxiliary")],
+    )
+    interaction = _interaction(policy)
+    intervention = Intervention(
+        "ambiguous",
+        InterventionTarget.ACTIVATION,
+        InterventionTiming.OUTPUT,
+        transform=torch.zeros_like,
+        module_path="module",
+    )
+    adapter = TDHookInteractionAdapter(interaction)
+    factory = TDHookInterventionFactory(interaction, (intervention,))
+
+    with adapter.activate(factory), pytest.raises(InterventionValidationError, match="2 tensor values"):
+        adapter.invoke(interaction.representative_input.clone())

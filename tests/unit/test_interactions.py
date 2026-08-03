@@ -16,6 +16,15 @@ from xdrl.interactions import (
     RuntimeInteractionContext,
     SchemaSnapshot,
 )
+from xdrl.interventions import (
+    Intervention,
+    InterventionController,
+    InterventionTarget,
+    InterventionTiming,
+    InterventionValidationError,
+    run_paired,
+)
+from xdrl.observations import ObservationTrace, RetentionPolicy, TensorRetention
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
 
@@ -209,3 +218,137 @@ def test_output_validation_failure_reports_output_shapes() -> None:
 
     assert context.events[-1].kind is LifecycleEventType.FAILURE
     assert context.events[-1].key_shapes == {"unexpected": (2, 3)}
+
+
+def test_tensordict_interventions_are_checked_and_record_checkpoint_provenance() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
+    descriptor = replace(_descriptor(InteractionPhase.EVALUATION, inputs, outputs), checkpoint_id="checkpoint-9")
+    no_op = Intervention(
+        "control",
+        InterventionTarget.TENSORDICT,
+        InterventionTiming.OUTPUT,
+        transform=lambda value: value.clone(),
+        key="action",
+    )
+    changed = Intervention(
+        "steer",
+        InterventionTarget.TENSORDICT,
+        InterventionTiming.OUTPUT,
+        transform=lambda value: value + 1,
+        key="action",
+    )
+    policy = _policy()
+    with torch.no_grad():
+        policy.module.weight.zero_()
+    baseline = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+    control = RuntimeInteractionContext(
+        descriptor, policy, inputs, outputs, batch, interventions=InterventionController((no_op,))
+    )
+    steered = RuntimeInteractionContext(
+        descriptor, policy, inputs, outputs, batch, interventions=InterventionController((changed,))
+    )
+
+    control_result = run_paired(baseline, control, batch)
+    result = run_paired(baseline, steered, batch)
+    expected = control_result.baseline.get("action")
+    assert torch.equal(control_result.intervention.get("action"), expected)
+    actual = result.intervention.get("action")
+
+    assert torch.equal(actual, expected + 1)
+    assert (result.interaction_id, result.checkpoint_id) == (descriptor.identity, "checkpoint-9")
+    record = steered.interventions.records[0]
+    assert (record.interaction_id, record.checkpoint_id) == (descriptor.identity, "checkpoint-9")
+
+
+def test_paired_execution_reuses_randomness_for_a_no_op_intervention() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
+    policy = TensorDictModule(torch.nn.Dropout(p=0.5), in_keys=["observation"], out_keys=["action"])
+    descriptor = _descriptor(InteractionPhase.EVALUATION, inputs, outputs)
+    no_op = Intervention(
+        "control",
+        InterventionTarget.TENSORDICT,
+        InterventionTiming.OUTPUT,
+        transform=lambda value: value.clone(),
+        key="action",
+    )
+    baseline = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+    control = RuntimeInteractionContext(
+        descriptor, policy, inputs, outputs, batch, interventions=InterventionController((no_op,))
+    )
+
+    torch.manual_seed(7)
+    result = run_paired(baseline, control, batch)
+
+    assert torch.equal(result.baseline.get("action"), result.intervention.get("action"))
+
+
+def test_invalid_tensordict_interventions_fail_at_the_contract_boundary() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
+    invalid = Intervention(
+        "bad-shape",
+        InterventionTarget.TENSORDICT,
+        InterventionTiming.INPUT,
+        transform=lambda value: value[..., :1],
+        key="observation",
+    )
+    context = RuntimeInteractionContext(
+        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+        _policy(),
+        inputs,
+        outputs,
+        batch,
+        interventions=InterventionController((invalid,)),
+    )
+
+    with context, pytest.raises(InterventionValidationError, match="must preserve shape"):
+        context.invoke(batch.clone())
+
+    with pytest.raises(InterventionValidationError, match="declared required key"):
+        RuntimeInteractionContext(
+            _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+            _policy(),
+            inputs,
+            outputs,
+            batch,
+            interventions=InterventionController(
+                (
+                    Intervention(
+                        "bad-key",
+                        InterventionTarget.TENSORDICT,
+                        InterventionTiming.INPUT,
+                        replacement=torch.ones(2, 2),
+                        key="missing",
+                    ),
+                )
+            ),
+        )
+
+
+def test_input_observations_capture_the_intervened_value() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.ones(1, 2)}, batch_size=[1])
+    intervention = Intervention(
+        "zero-input",
+        InterventionTarget.TENSORDICT,
+        InterventionTiming.INPUT,
+        transform=torch.zeros_like,
+        key="observation",
+    )
+    trace = ObservationTrace(RetentionPolicy(tensor=TensorRetention.DETACHED))
+    context = RuntimeInteractionContext(
+        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+        _policy(),
+        inputs,
+        outputs,
+        batch,
+        observations=trace,
+        interventions=InterventionController((intervention,)),
+    )
+
+    with context:
+        context.invoke(batch.clone())
+
+    assert torch.equal(trace.records[0].payload, torch.zeros(1, 2))
