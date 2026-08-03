@@ -42,6 +42,22 @@ def _descriptor(
     )
 
 
+def _state_schemas(dimensions: tuple[str, ...] = ("env",)) -> tuple[TensorDictSchema, TensorDictSchema]:
+    return (
+        TensorDictSchema(
+            (
+                KeySchema("state", KeyRole.STATE, KeyPresence.REQUIRED),
+                KeySchema("is_init", KeyRole.TERMINATION, KeyPresence.REQUIRED),
+            ),
+            BatchSemantics(dimensions),
+        ),
+        TensorDictSchema(
+            (KeySchema(("next", "state"), KeyRole.STATE, KeyPresence.PRODUCED),),
+            BatchSemantics(dimensions),
+        ),
+    )
+
+
 def test_torchrl_lstm_state_transitions_and_reset_masks_are_validated() -> None:
     inputs = TensorDictSchema(
         (
@@ -130,6 +146,52 @@ def test_recurrent_contract_rejects_bad_masks_and_unsupported_collectors() -> No
             context.invoke(batch.clone().set("is_init", torch.zeros(2, 1)))
 
 
+@pytest.mark.parametrize(
+    ("transitions", "burn_in", "truncated_window", "message"),
+    [
+        ((), 0, None, "at least one"),
+        ((RecurrentStateTransition(("state",), ("next", "state")),), -1, None, "non-negative"),
+        ((RecurrentStateTransition(("state",), ("next", "state")),), 0, 0, "positive"),
+        ((RecurrentStateTransition(("state",), ("next", "state")),), 2, 2, "smaller"),
+    ],
+)
+def test_recurrent_semantics_reject_invalid_windows(
+    transitions: tuple[RecurrentStateTransition, ...],
+    burn_in: int,
+    truncated_window: int | None,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        RecurrentSemantics(transitions, (), burn_in=burn_in, truncated_window=truncated_window)
+
+
+def test_agent_and_multi_agent_semantics_reject_invalid_selectors() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        AgentSelector("")
+    with pytest.raises(ValueError, match="duplicate"):
+        AgentSelector("agents", (1, 1))
+    selector = AgentSelector("agents")
+
+    with pytest.raises(ValueError, match="non-empty"):
+        MultiAgentSemantics(InteractionTopology.INDEPENDENT, "", 2, SemanticTarget(ModelRole.ACTOR, selector))
+    with pytest.raises(ValueError, match="positive"):
+        MultiAgentSemantics(InteractionTopology.INDEPENDENT, "agents", 0, SemanticTarget(ModelRole.ACTOR, selector))
+    with pytest.raises(ValueError, match="must match"):
+        MultiAgentSemantics(
+            InteractionTopology.INDEPENDENT,
+            "agents",
+            2,
+            SemanticTarget(ModelRole.ACTOR, AgentSelector("other")),
+        )
+    with pytest.raises(ValueError, match="outside"):
+        MultiAgentSemantics(
+            InteractionTopology.INDEPENDENT,
+            "agents",
+            2,
+            SemanticTarget(ModelRole.ACTOR, AgentSelector("agents", (2,))),
+        )
+
+
 def test_recurrent_contract_rejects_non_state_transition_keys() -> None:
     inputs = TensorDictSchema(
         (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),), BatchSemantics(("env",))
@@ -142,6 +204,73 @@ def test_recurrent_contract_rejects_non_state_transition_keys() -> None:
 
     with pytest.raises(ValueError, match="must be required state"):
         _descriptor(ModelRole.ACTOR, "policy.rnn", inputs, outputs, recurrent=recurrent)
+
+
+@pytest.mark.parametrize(
+    ("transition", "reset_keys", "time_dimension", "sequence_dimension", "message"),
+    [
+        (RecurrentStateTransition(("missing",), ("next", "state")), (), None, None, "input state key.*not declared"),
+        (RecurrentStateTransition(("state",), ("next", "missing")), (), None, None, "output state key.*not declared"),
+        (
+            RecurrentStateTransition(("state",), ("next", "state")),
+            (("missing",),),
+            None,
+            None,
+            "reset key.*not declared",
+        ),
+        (RecurrentStateTransition(("state",), ("next", "state")), (), "other", "time", "must match"),
+        (RecurrentStateTransition(("state",), ("next", "state")), (), "time", "time", "declared batch"),
+    ],
+)
+def test_recurrent_descriptor_rejects_invalid_key_and_time_declarations(
+    transition: RecurrentStateTransition,
+    reset_keys: tuple[tuple[str, ...], ...],
+    time_dimension: str | None,
+    sequence_dimension: str | None,
+    message: str,
+) -> None:
+    inputs, outputs = _state_schemas()
+    recurrent = RecurrentSemantics((transition,), reset_keys, sequence_dimension=sequence_dimension)
+
+    with pytest.raises(ValueError, match=message):
+        _descriptor(
+            ModelRole.ACTOR,
+            "policy.rnn",
+            inputs,
+            outputs,
+            time_dimension=time_dimension,
+            recurrent=recurrent,
+        )
+
+
+@pytest.mark.parametrize(
+    ("topology", "role", "target_role", "agent_dimension", "message"),
+    [
+        (InteractionTopology.INDEPENDENT, ModelRole.ACTOR, ModelRole.ACTOR, None, "agent_dimension"),
+        (InteractionTopology.INDEPENDENT, ModelRole.ACTOR, ModelRole.CRITIC, "agent", "must match"),
+        (InteractionTopology.CENTRALISED_CRITIC, ModelRole.ACTOR, ModelRole.ACTOR, "agent", "critic or value"),
+        (InteractionTopology.MIXER, ModelRole.ACTOR, ModelRole.ACTOR, "agent", "mixer model role"),
+    ],
+)
+def test_multi_agent_descriptor_rejects_invalid_role_and_axis_contracts(
+    topology: InteractionTopology,
+    role: ModelRole,
+    target_role: ModelRole,
+    agent_dimension: str | None,
+    message: str,
+) -> None:
+    schema = TensorDictSchema((), BatchSemantics(("env",)))
+    semantics = MultiAgentSemantics(topology, "agents", 2, SemanticTarget(target_role, AgentSelector("agents")))
+
+    with pytest.raises(ValueError, match=message):
+        _descriptor(
+            role,
+            "policy.module",
+            schema,
+            schema,
+            agent_dimension=agent_dimension,
+            multi_agent=semantics,
+        )
 
 
 def test_replay_sequence_serialises_time_axis_burn_in_and_truncated_window() -> None:

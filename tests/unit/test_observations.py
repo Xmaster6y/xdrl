@@ -189,6 +189,22 @@ def test_reduction_rejects_an_unnamed_batch_axis() -> None:
         )
 
 
+def test_reduction_policy_rejects_invalid_dimensions_and_limits() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        DimensionReduction("", ReductionKind.MEAN)
+    with pytest.raises(ValueError, match="at most one"):
+        RetentionPolicy(
+            reductions=(
+                DimensionReduction("agent", ReductionKind.MEAN),
+                DimensionReduction("agent", ReductionKind.SUM),
+            )
+        )
+    with pytest.raises(ValueError, match="at least 1"):
+        RetentionPolicy(every_n=0)
+    with pytest.raises(ValueError, match="non-negative"):
+        RetentionPolicy(max_records=-1)
+
+
 def test_composite_schema_parent_captures_nested_tensor_leaves() -> None:
     inputs, outputs = _schemas()
     descriptor = _descriptor(inputs, outputs)
