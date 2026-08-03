@@ -18,9 +18,11 @@ from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
 from torchrl.envs.utils import set_exploration_type
 
+from xdrl.interventions import InterventionTiming
 from xdrl.types import ModelRole, TensorDictKey, TensorDictSchema
 
 if TYPE_CHECKING:
+    from xdrl.interventions import InterventionController
     from xdrl.observations import ObservationTrace
 
 
@@ -159,6 +161,7 @@ class RuntimeInteractionContext:
     representative_input: TensorDictBase
     hook_context_factory: HookContextFactory | None = None
     observations: ObservationTrace | None = None
+    interventions: InterventionController | None = None
     events: list[LifecycleEvent] = field(default_factory=list, init=False)
     _stack: ExitStack | None = field(default=None, init=False, repr=False)
 
@@ -168,6 +171,8 @@ class RuntimeInteractionContext:
         if SchemaSnapshot.from_schema(self.output_schema) != self.descriptor.output_schema:
             raise ValueError("output_schema does not match the interaction descriptor snapshot")
         self.input_schema.validate_inputs(self.representative_input)
+        if self.interventions is not None:
+            self.interventions.validate(self)
 
     def __enter__(self) -> RuntimeInteractionContext:
         if self._stack is not None:
@@ -208,12 +213,16 @@ class RuntimeInteractionContext:
         self._capture_observations(tensordict, input=True)
         try:
             self.input_schema.validate_inputs(tensordict)
+            if self.interventions is not None:
+                tensordict = self.interventions.apply(self, tensordict, InterventionTiming.INPUT)
             result = (self.module if module is None else module)(tensordict)
         except BaseException as error:
             self._record(LifecycleEventType.FAILURE, tensordict, error)
             raise
         try:
             self.output_schema.validate_outputs(result)
+            if self.interventions is not None:
+                result = self.interventions.apply(self, result, InterventionTiming.OUTPUT)
         except BaseException as error:
             self._record(LifecycleEventType.FAILURE, result, error)
             raise

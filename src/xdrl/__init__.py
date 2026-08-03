@@ -1,6 +1,18 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext
+from xdrl.interventions import (
+    Intervention,
+    InterventionController,
+    InterventionRecord,
+    InterventionScope,
+    InterventionTarget,
+    InterventionTiming,
+    InterventionValidationError,
+    PairedInterventionResult,
+    TDHookInterventionFactory,
+    run_paired,
+)
 from xdrl.observations import ObservationKind, ObservationRecord, ObservationTrace, RetentionPolicy, TensorRetention
 from xdrl.tdhook import TDHookInteractionAdapter
 from xdrl.types import ModelRole, TensorDictSchema
@@ -12,6 +24,13 @@ except PackageNotFoundError:
 
 __all__ = [
     "InteractionDescriptor",
+    "Intervention",
+    "InterventionController",
+    "InterventionRecord",
+    "InterventionScope",
+    "InterventionTarget",
+    "InterventionTiming",
+    "InterventionValidationError",
     "InteractionPhase",
     "ModelRole",
     "ObservationKind",
@@ -19,7 +38,10 @@ __all__ = [
     "ObservationTrace",
     "RetentionPolicy",
     "RuntimeInteractionContext",
+    "PairedInterventionResult",
     "TDHookInteractionAdapter",
+    "TDHookInterventionFactory",
     "TensorDictSchema",
     "TensorRetention",
+    "run_paired",
 ]

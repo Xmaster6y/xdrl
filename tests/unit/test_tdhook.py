@@ -5,6 +5,7 @@ from tensordict.nn import TensorDictModule
 from tdhook.latent.activation_caching import ActivationCaching
 
 from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext, SchemaSnapshot
+from xdrl.interventions import Intervention, InterventionTarget, InterventionTiming, TDHookInterventionFactory
 from xdrl.tdhook import TDHookInteractionAdapter
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
@@ -116,4 +117,24 @@ def test_adapter_removes_hooks_when_invocation_fails() -> None:
     with pytest.raises(RuntimeError, match="boom"):
         with adapter.activate(factory):
             raise RuntimeError("boom")
+    assert not policy.module._forward_hooks
+
+
+def test_tdhook_activation_intervention_changes_output_and_removes_its_hook() -> None:
+    policy = _policy()
+    interaction = _interaction(policy)
+    intervention = Intervention(
+        "zero-head",
+        InterventionTarget.ACTIVATION,
+        InterventionTiming.OUTPUT,
+        transform=torch.zeros_like,
+        module_path="module",
+    )
+    adapter = TDHookInteractionAdapter(interaction)
+    factory = TDHookInterventionFactory(interaction, (intervention,))
+
+    with adapter.activate(factory) as active:
+        result = active.invoke(interaction.representative_input.clone())
+        assert torch.equal(result.get(("agents", "action")), torch.zeros(3, 2, 1))
+
     assert not policy.module._forward_hooks
