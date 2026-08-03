@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from typing import Any
 
@@ -58,19 +58,40 @@ class OverflowPolicy(str, Enum):
     RAISE = "raise"
 
 
+class ReductionKind(str, Enum):
+    """A named tensor reduction supported by observation retention."""
+
+    MEAN = "mean"
+    SUM = "sum"
+    MAX = "max"
+
+
+@dataclass(frozen=True, slots=True)
+class DimensionReduction:
+    """Reduce one explicitly named batch dimension."""
+
+    dimension: str
+    kind: ReductionKind
+
+    def __post_init__(self) -> None:
+        if not self.dimension:
+            raise ValueError("reduction dimension must be non-empty")
+
+
 @dataclass(frozen=True, slots=True)
 class RetentionPolicy:
     """Explicit graph, device, sampling, reduction, and backpressure policy.
 
     ``every_n`` samples observations by monotonically increasing observation
-    order. ``reduction`` applies only across named batch dimensions and emits
-    a record with those dimensions removed.  Payloads are always detached and
-    cloned, so this package never retains a computation graph by accident.
+    order. ``reductions`` applies named policies only to matching batch
+    dimensions and emits a record with those dimensions removed. Payloads are
+    always detached and cloned, so this package never retains a computation
+    graph by accident.
     """
 
     tensor: TensorRetention = TensorRetention.METADATA
     every_n: int = 1
-    reduction: str | None = None
+    reductions: tuple[DimensionReduction, ...] = ()
     max_records: int = 1_024
     overflow: OverflowPolicy = OverflowPolicy.DROP_OLDEST
 
@@ -79,8 +100,13 @@ class RetentionPolicy:
             raise ValueError("every_n must be at least 1")
         if self.max_records < 0:
             raise ValueError("max_records must be non-negative")
-        if self.reduction not in {None, "mean", "sum", "max"}:
-            raise ValueError("reduction must be one of None, 'mean', 'sum', or 'max'")
+        dimensions = tuple(reduction.dimension for reduction in self.reductions)
+        if len(set(dimensions)) != len(dimensions):
+            raise ValueError("each batch dimension can have at most one reduction policy")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the retention and named reduction policies as JSON data."""
+        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,12 +261,17 @@ def _retain(
         return None, known_dimensions
     value = tensor.detach()
     retained_dimensions = known_dimensions
-    if policy.reduction is not None and batch_dimensions:
-        dims = tuple(range(len(batch_dimensions)))
+    reductions = () if batch_dimensions is None else policy.reductions
+    for reduction in reductions:
+        if reduction.dimension not in retained_dimensions:
+            raise ValueError(f"reduction dimension {reduction.dimension!r} is not present in {retained_dimensions!r}")
+        dimension = retained_dimensions.index(reduction.dimension)
         value = (
-            torch.amax(value, dim=dims) if policy.reduction == "max" else getattr(value, policy.reduction)(dim=dims)
+            torch.amax(value, dim=dimension)
+            if reduction.kind is ReductionKind.MAX
+            else getattr(value, reduction.kind.value)(dim=dimension)
         )
-        retained_dimensions = ()
+        retained_dimensions = tuple(name for index, name in enumerate(retained_dimensions) if index != dimension)
     if policy.tensor is TensorRetention.CPU:
         value = value.cpu()
     return value.clone(), retained_dimensions

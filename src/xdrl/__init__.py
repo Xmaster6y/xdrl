@@ -1,6 +1,17 @@
 from importlib.metadata import PackageNotFoundError, version
 
-from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext
+from xdrl.interactions import (
+    AgentSelector,
+    InteractionDescriptor,
+    InteractionPhase,
+    InteractionTopology,
+    MultiAgentSemantics,
+    RecurrentCollectorMode,
+    RecurrentSemantics,
+    RecurrentStateTransition,
+    RuntimeInteractionContext,
+    SemanticTarget,
+)
 from xdrl.interventions import (
     Intervention,
     InterventionController,
@@ -13,7 +24,15 @@ from xdrl.interventions import (
     TDHookInterventionFactory,
     run_paired,
 )
-from xdrl.observations import ObservationKind, ObservationRecord, ObservationTrace, RetentionPolicy, TensorRetention
+from xdrl.observations import (
+    DimensionReduction,
+    ObservationKind,
+    ObservationRecord,
+    ObservationTrace,
+    ReductionKind,
+    RetentionPolicy,
+    TensorRetention,
+)
 from xdrl.tdhook import TDHookInteractionAdapter
 from xdrl.types import ModelRole, TensorDictSchema
 
@@ -24,6 +43,7 @@ except PackageNotFoundError:
 
 __all__ = [
     "InteractionDescriptor",
+    "InteractionTopology",
     "Intervention",
     "InterventionController",
     "InterventionRecord",
@@ -32,12 +52,20 @@ __all__ = [
     "InterventionTiming",
     "InterventionValidationError",
     "InteractionPhase",
+    "AgentSelector",
+    "MultiAgentSemantics",
     "ModelRole",
     "ObservationKind",
     "ObservationRecord",
     "ObservationTrace",
+    "DimensionReduction",
+    "ReductionKind",
+    "RecurrentCollectorMode",
+    "RecurrentSemantics",
+    "RecurrentStateTransition",
     "RetentionPolicy",
     "RuntimeInteractionContext",
+    "SemanticTarget",
     "PairedInterventionResult",
     "TDHookInteractionAdapter",
     "TDHookInterventionFactory",

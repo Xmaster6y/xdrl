@@ -1,14 +1,17 @@
 import json
 
+import pytest
 import torch
 from tensordict import TensorDict
 
 from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext, SchemaSnapshot
 from xdrl.observations import (
+    DimensionReduction,
     HookDirection,
     ObservationKind,
     ObservationTrace,
     OverflowPolicy,
+    ReductionKind,
     RetentionPolicy,
     TensorRetention,
 )
@@ -85,7 +88,13 @@ def test_trace_is_serialisable_and_observation_only_preserves_model_output() -> 
 
 def test_retention_detaches_reduces_and_bounds_records() -> None:
     inputs, outputs = _schemas()
-    trace = ObservationTrace(RetentionPolicy(tensor=TensorRetention.CPU, reduction="mean", max_records=1))
+    trace = ObservationTrace(
+        RetentionPolicy(
+            tensor=TensorRetention.CPU,
+            reductions=(DimensionReduction("env", ReductionKind.MEAN),),
+            max_records=1,
+        )
+    )
     descriptor = _descriptor(inputs, outputs)
     source = torch.tensor([[1.0, 3.0], [5.0, 7.0]], requires_grad=True)
     first = trace.observe_tensor(
@@ -111,7 +120,12 @@ def test_retention_detaches_reduces_and_bounds_records() -> None:
 def test_max_reduction_and_unbatched_hook_tensors_are_handled_explicitly() -> None:
     inputs, outputs = _schemas()
     descriptor = _descriptor(inputs, outputs)
-    trace = ObservationTrace(RetentionPolicy(tensor=TensorRetention.DETACHED, reduction="max"))
+    trace = ObservationTrace(
+        RetentionPolicy(
+            tensor=TensorRetention.DETACHED,
+            reductions=(DimensionReduction("env", ReductionKind.MAX),),
+        )
+    )
     reduced = trace.observe_tensor(
         descriptor,
         torch.tensor([[1.0, 5.0], [4.0, 3.0]]),
@@ -126,6 +140,52 @@ def test_max_reduction_and_unbatched_hook_tensors_are_handled_explicitly() -> No
     assert reduced.retained_batch_dimensions == ()
     assert unbatched is not None and torch.equal(unbatched.payload, torch.tensor([1.0, 5.0]))
     assert unbatched.retained_batch_dimensions == ()
+
+
+def test_agent_and_time_reductions_are_named_serialised_and_opt_in() -> None:
+    policy = RetentionPolicy(
+        tensor=TensorRetention.DETACHED,
+        reductions=(
+            DimensionReduction("time", ReductionKind.MEAN),
+            DimensionReduction("agent", ReductionKind.SUM),
+        ),
+    )
+    trace = ObservationTrace(policy)
+    inputs, outputs = _schemas()
+    record = trace.observe_tensor(
+        _descriptor(inputs, outputs),
+        torch.arange(24, dtype=torch.float).reshape(2, 3, 4, 1),
+        kind=ObservationKind.ACTIVATION,
+        target="shared_encoder",
+        batch_dimensions=("env", "time", "agent"),
+    )
+
+    assert record is not None and record.payload is not None
+    assert record.payload.shape == (2, 1)
+    assert record.retained_batch_dimensions == ("env",)
+    assert json.loads(json.dumps(policy.to_dict()))["reductions"] == [
+        {"dimension": "time", "kind": "mean"},
+        {"dimension": "agent", "kind": "sum"},
+    ]
+
+
+def test_reduction_rejects_an_unnamed_batch_axis() -> None:
+    trace = ObservationTrace(
+        RetentionPolicy(
+            tensor=TensorRetention.DETACHED,
+            reductions=(DimensionReduction("agent", ReductionKind.MEAN),),
+        )
+    )
+    inputs, outputs = _schemas()
+
+    with pytest.raises(ValueError, match="agent.*not present"):
+        trace.observe_tensor(
+            _descriptor(inputs, outputs),
+            torch.zeros(2, 3),
+            kind=ObservationKind.ACTIVATION,
+            target="encoder",
+            batch_dimensions=("env",),
+        )
 
 
 def test_composite_schema_parent_captures_nested_tensor_leaves() -> None:
