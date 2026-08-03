@@ -89,16 +89,71 @@ def test_retention_detaches_reduces_and_bounds_records() -> None:
     descriptor = _descriptor(inputs, outputs)
     source = torch.tensor([[1.0, 3.0], [5.0, 7.0]], requires_grad=True)
     first = trace.observe_tensor(
-        descriptor, source, kind=ObservationKind.ACTIVATION, target="encoder", direction=HookDirection.OUTPUT
+        descriptor,
+        source,
+        kind=ObservationKind.ACTIVATION,
+        target="encoder",
+        direction=HookDirection.OUTPUT,
+        batch_dimensions=("env",),
     )
     assert first is not None and first.payload is not None
     assert not first.payload.requires_grad
     assert first.payload.device.type == "cpu"
     assert first.retained_batch_dimensions == ()
     assert torch.equal(first.payload, torch.tensor([3.0, 5.0]))
-    trace.observe_tensor(descriptor, source, kind=ObservationKind.GRADIENT, target="encoder")
+    trace.observe_tensor(
+        descriptor, source, kind=ObservationKind.GRADIENT, target="encoder", batch_dimensions=("env",)
+    )
     assert len(trace.records) == 1
     assert trace.dropped == 1
+
+
+def test_max_reduction_and_unbatched_hook_tensors_are_handled_explicitly() -> None:
+    inputs, outputs = _schemas()
+    descriptor = _descriptor(inputs, outputs)
+    trace = ObservationTrace(RetentionPolicy(tensor=TensorRetention.DETACHED, reduction="max"))
+    reduced = trace.observe_tensor(
+        descriptor,
+        torch.tensor([[1.0, 5.0], [4.0, 3.0]]),
+        kind=ObservationKind.ACTIVATION,
+        target="encoder",
+        batch_dimensions=("env",),
+    )
+    unbatched = trace.observe_tensor(
+        descriptor, torch.tensor([1.0, 5.0]), kind=ObservationKind.GRADIENT, target="encoder"
+    )
+    assert reduced is not None and torch.equal(reduced.payload, torch.tensor([4.0, 5.0]))
+    assert reduced.retained_batch_dimensions == ()
+    assert unbatched is not None and torch.equal(unbatched.payload, torch.tensor([1.0, 5.0]))
+    assert unbatched.retained_batch_dimensions == ()
+
+
+def test_composite_schema_parent_captures_nested_tensor_leaves() -> None:
+    inputs, outputs = _schemas()
+    descriptor = _descriptor(inputs, outputs)
+    trace = ObservationTrace()
+    batch = TensorDict({"agents": TensorDict({"observation": torch.zeros(2, 3)}, batch_size=[2])}, batch_size=[2])
+
+    records = trace.capture_tensordict(
+        descriptor,
+        batch,
+        direction=HookDirection.INPUT,
+        roles={("agents",): KeyRole.OBSERVATION},
+    )
+
+    assert len(records) == 1
+    assert records[0].key_path == ("agents", "observation")
+    assert records[0].kind is ObservationKind.MODULE_INPUT
+
+
+def test_observation_serialisation_does_not_include_retained_payload() -> None:
+    inputs, outputs = _schemas()
+    record = ObservationTrace(RetentionPolicy(tensor=TensorRetention.DETACHED)).observe_tensor(
+        _descriptor(inputs, outputs), torch.ones(1), kind=ObservationKind.ACTIVATION, target="encoder"
+    )
+    assert record is not None and record.payload is not None
+    assert "payload" not in record.to_dict()
+    json.dumps(record.to_dict())
 
 
 def test_sampling_streaming_and_backpressure_are_explicit() -> None:

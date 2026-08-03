@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from typing import Any
 
@@ -113,9 +113,7 @@ class ObservationRecord:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible record without its optional tensor payload."""
-        result = asdict(self)
-        result.pop("payload")
-        return result
+        return {item.name: getattr(self, item.name) for item in fields(self) if item.name != "payload"}
 
 
 ObservationCallback = Callable[[ObservationRecord], None]
@@ -140,13 +138,19 @@ class ObservationTrace:
         target: str,
         direction: HookDirection = HookDirection.TENSOR,
         key: TensorDictKey | None = None,
+        batch_dimensions: tuple[str, ...] | None = None,
     ) -> ObservationRecord | None:
-        """Capture a hook, gradient, or arbitrary tensor with explicit retention."""
+        """Capture a hook, gradient, or arbitrary tensor with explicit retention.
+
+        Pass ``batch_dimensions`` only when the leading dimensions of ``tensor``
+        are known to have those semantics.  This prevents an arbitrary hook or
+        gradient tensor from being reduced along unrelated feature dimensions.
+        """
         order = self._seen
         self._seen += 1
         if order % self.policy.every_n:
             return None
-        value, retained_dimensions = _retain(tensor, descriptor.batch_dimensions, self.policy)
+        value, retained_dimensions = _retain(tensor, batch_dimensions, self.policy)
         record = ObservationRecord(
             order=order,
             interaction_id=descriptor.identity,
@@ -194,16 +198,19 @@ class ObservationTrace:
             # TensorDict modules commonly mutate their input in place.  Only
             # declared keys belong to this interaction direction; retaining
             # untouched input leaves as module outputs would mislabel them.
-            if path not in roles:
+            # A declared TensorDict/Composite parent applies to all its leaves.
+            role = _role_for_path(path, roles)
+            if role is None:
                 continue
             records.append(
                 self.observe_tensor(
                     descriptor,
                     value,
-                    kind=_kind_for(roles.get(path), direction),
+                    kind=_kind_for(role, direction),
                     target="/".join(path),
                     direction=direction,
                     key=key,
+                    batch_dimensions=descriptor.batch_dimensions,
                 )
             )
         return tuple(record for record in records if record is not None)
@@ -221,15 +228,18 @@ class ObservationTrace:
 
 
 def _retain(
-    tensor: torch.Tensor, batch_dimensions: tuple[str, ...], policy: RetentionPolicy
+    tensor: torch.Tensor, batch_dimensions: tuple[str, ...] | None, policy: RetentionPolicy
 ) -> tuple[torch.Tensor | None, tuple[str, ...]]:
+    known_dimensions = () if batch_dimensions is None else batch_dimensions
     if policy.tensor is TensorRetention.METADATA:
-        return None, batch_dimensions
+        return None, known_dimensions
     value = tensor.detach()
-    retained_dimensions = batch_dimensions
+    retained_dimensions = known_dimensions
     if policy.reduction is not None and batch_dimensions:
         dims = tuple(range(len(batch_dimensions)))
-        value = getattr(value, policy.reduction)(dim=dims)
+        value = (
+            torch.amax(value, dim=dims) if policy.reduction == "max" else getattr(value, policy.reduction)(dim=dims)
+        )
         retained_dimensions = ()
     if policy.tensor is TensorRetention.CPU:
         value = value.cpu()
@@ -244,6 +254,15 @@ def _kind_for(role: KeyRole | None, direction: HookDirection) -> ObservationKind
     if role is KeyRole.DISTRIBUTION_PARAMETER:
         return ObservationKind.DISTRIBUTION_PARAMETER
     return ObservationKind.MODULE_INPUT if direction is HookDirection.INPUT else ObservationKind.MODULE_OUTPUT
+
+
+def _role_for_path(path: tuple[str, ...], roles: Mapping[tuple[str, ...], KeyRole]) -> KeyRole | None:
+    """Find the most specific declared schema key that contains ``path``."""
+    for length in range(len(path), 0, -1):
+        role = roles.get(path[:length])
+        if role is not None:
+            return role
+    return None
 
 
 def _key_path(key: TensorDictKey) -> tuple[str, ...]:
