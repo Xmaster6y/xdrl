@@ -120,12 +120,28 @@ def test_recurrent_contract_rejects_bad_masks_and_unsupported_collectors() -> No
     )
     descriptor = _descriptor(ModelRole.ACTOR, "policy.rnn", inputs, outputs, recurrent=recurrent)
     batch = TensorDict(
-        {"state": torch.zeros(2, 1), "is_init": torch.zeros(2, 1)},
+        {"state": torch.zeros(2, 1), "is_init": torch.zeros(2, 1, dtype=torch.bool)},
         batch_size=[2],
     )
+    context = RuntimeInteractionContext(descriptor, torch.nn.Identity(), inputs, outputs, batch)
 
     with pytest.raises(ValueError, match="boolean tensor"):
-        RuntimeInteractionContext(descriptor, torch.nn.Identity(), inputs, outputs, batch)
+        with context:
+            context.invoke(batch.clone().set("is_init", torch.zeros(2, 1)))
+
+
+def test_recurrent_contract_rejects_non_state_transition_keys() -> None:
+    inputs = TensorDictSchema(
+        (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),), BatchSemantics(("env",))
+    )
+    outputs = TensorDictSchema((KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),), BatchSemantics(("env",)))
+    recurrent = RecurrentSemantics(
+        transitions=(RecurrentStateTransition(("observation",), ("action",)),),
+        reset_keys=(),
+    )
+
+    with pytest.raises(ValueError, match="must be required state"):
+        _descriptor(ModelRole.ACTOR, "policy.rnn", inputs, outputs, recurrent=recurrent)
 
 
 def test_replay_sequence_serialises_time_axis_burn_in_and_truncated_window() -> None:

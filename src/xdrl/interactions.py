@@ -19,7 +19,7 @@ from tensordict.nn import TensorDictModuleBase
 from torchrl.envs.utils import set_exploration_type
 
 from xdrl.interventions import InterventionTiming
-from xdrl.types import ModelRole, TensorDictKey, TensorDictSchema
+from xdrl.types import KeyPresence, KeyRole, ModelRole, TensorDictKey, TensorDictSchema
 
 if TYPE_CHECKING:
     from xdrl.interventions import InterventionController
@@ -343,6 +343,7 @@ class RuntimeInteractionContext:
             self.input_schema.validate_inputs(tensordict)
             if self.interventions is not None:
                 tensordict = self.interventions.apply(self, tensordict, InterventionTiming.INPUT)
+            self._validate_recurrent_input(tensordict)
             self._capture_observations(tensordict, input=True)
             result = invoked_module(tensordict)
         except BaseException as error:
@@ -421,15 +422,21 @@ def _key_path(key: TensorDictKey) -> tuple[str, ...]:
 def _validate_recurrent_descriptor(descriptor: InteractionDescriptor) -> None:
     recurrent = descriptor.recurrent
     assert recurrent is not None
-    input_paths = {key.path for key in descriptor.input_schema.keys}
-    output_paths = {key.path for key in descriptor.output_schema.keys}
+    input_entries = {key.path: key for key in descriptor.input_schema.keys}
+    output_entries = {key.path: key for key in descriptor.output_schema.keys}
     for transition in recurrent.transitions:
-        if transition.input_key not in input_paths:
+        input_entry = input_entries.get(transition.input_key)
+        if input_entry is None:
             raise ValueError(f"recurrent input state key {'/'.join(transition.input_key)} is not declared")
-        if transition.output_key not in output_paths:
+        output_entry = output_entries.get(transition.output_key)
+        if output_entry is None:
             raise ValueError(f"recurrent output state key {'/'.join(transition.output_key)} is not declared")
+        if input_entry.role != KeyRole.STATE.value or input_entry.presence != KeyPresence.REQUIRED.value:
+            raise ValueError(f"recurrent input state key {'/'.join(transition.input_key)} must be required state")
+        if output_entry.role != KeyRole.STATE.value or output_entry.presence != KeyPresence.PRODUCED.value:
+            raise ValueError(f"recurrent output state key {'/'.join(transition.output_key)} must be produced state")
     for reset_key in recurrent.reset_keys:
-        if reset_key not in input_paths:
+        if reset_key not in input_entries:
             raise ValueError(f"recurrent reset key {'/'.join(reset_key)} is not declared")
     if recurrent.sequence_dimension != descriptor.time_dimension:
         raise ValueError("recurrent sequence_dimension must match descriptor time_dimension")

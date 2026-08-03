@@ -162,6 +162,7 @@ def test_agent_and_time_reductions_are_named_serialised_and_opt_in() -> None:
 
     assert record is not None and record.payload is not None
     assert record.payload.shape == (2, 1)
+    assert torch.equal(record.payload, torch.tensor([[22.0], [70.0]]))
     assert record.retained_batch_dimensions == ("env",)
     assert json.loads(json.dumps(policy.to_dict()))["reductions"] == [
         {"dimension": "time", "kind": "mean"},
