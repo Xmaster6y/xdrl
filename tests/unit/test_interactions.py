@@ -106,6 +106,54 @@ def test_context_restores_execution_and_hook_state_after_exception() -> None:
     assert entered == ["entered", "exited"]
 
 
+def test_one_shot_call_is_a_synchronous_policy_and_restores_model_mode() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.zeros(2, 2)}, batch_size=[2])
+    policy = _policy()
+    policy.train()
+    descriptor = replace(
+        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+        module_training=False,
+    )
+    observed_modes: list[bool] = []
+    original_forward = policy.module.forward
+
+    def record_mode(value: torch.Tensor) -> torch.Tensor:
+        observed_modes.append(policy.training)
+        return original_forward(value)
+
+    policy.module.forward = record_mode
+    context = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+
+    result = context(batch.clone())
+
+    assert set(result.keys()) == {"observation", "action"}
+    assert observed_modes == [False]
+    assert policy.training
+    assert [event.kind for event in context.events] == [LifecycleEventType.BEFORE, LifecycleEventType.AFTER]
+
+
+def test_context_restores_mixed_submodule_modes_after_failure() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.zeros(1, 2)}, batch_size=[1])
+    policy = _policy()
+    policy.train()
+    policy.module.eval()
+    original_modes = tuple(module.training for module in policy.modules())
+    descriptor = replace(
+        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+        module_training=False,
+    )
+    context = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with context:
+            assert all(not module.training for module in policy.modules())
+            raise RuntimeError("boom")
+
+    assert tuple(module.training for module in policy.modules()) == original_modes
+
+
 def test_context_enables_gradients_inside_outer_inference_mode() -> None:
     inputs, outputs = _schemas()
     batch = TensorDict({"observation": torch.zeros(1, 2)}, batch_size=[1])
@@ -185,6 +233,20 @@ class _FailingPolicy:
 class _InvalidOutputPolicy:
     def __call__(self, tensordict: TensorDict) -> TensorDict:
         return TensorDict({"unexpected": torch.zeros(*tensordict.batch_size, 3)}, batch_size=tensordict.batch_size)
+
+
+def test_module_mode_requires_a_torch_module() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.zeros(1, 2)}, batch_size=[1])
+    descriptor = replace(
+        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+        module_training=False,
+    )
+    context = RuntimeInteractionContext(descriptor, _FailingPolicy(), inputs, outputs, batch)
+
+    with pytest.raises(TypeError, match="torch.nn.Module"):
+        with context:
+            pass
 
 
 def test_failure_event_retains_only_diagnostics() -> None:

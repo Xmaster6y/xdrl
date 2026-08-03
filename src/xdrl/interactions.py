@@ -115,6 +115,7 @@ class InteractionDescriptor:
     module_aliases: Mapping[str, str] = field(default_factory=dict)
     model_id: str | None = None
     checkpoint_id: str | None = None
+    module_training: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible representation with no tensors or modules."""
@@ -179,6 +180,12 @@ class RuntimeInteractionContext:
             raise RuntimeError("interaction context is already active")
         stack = ExitStack()
         try:
+            if self.descriptor.module_training is not None:
+                if not isinstance(self.module, torch.nn.Module):
+                    raise TypeError("module_training requires the interaction module to be a torch.nn.Module")
+                training_states = tuple((module, module.training) for module in self.module.modules())
+                stack.callback(_restore_training_states, training_states)
+                self.module.train(self.descriptor.module_training)
             if self.descriptor.exploration_mode is not None:
                 stack.enter_context(set_exploration_type(self.descriptor.exploration_mode))
             stack.enter_context(torch.inference_mode(self.descriptor.inference_mode))
@@ -198,6 +205,17 @@ class RuntimeInteractionContext:
             raise
         self._stack = stack
         return self
+
+    def __call__(self, tensordict: TensorDictBase) -> TensorDictBase:
+        """Run one interaction, making the context usable as a synchronous policy.
+
+        This one-shot form is suitable for direct calls, deterministic rollouts,
+        and local :class:`~torchrl.collectors.SyncDataCollector` policies. Keep
+        the context open explicitly when hooks must remain installed through a
+        subsequent backward pass.
+        """
+        with self:
+            return self.invoke(tensordict)
 
     def __exit__(self, *exc_info: object) -> bool | None:
         if self._stack is None:
@@ -262,6 +280,12 @@ class RuntimeInteractionContext:
 
 def _key_path(key: TensorDictKey) -> tuple[str, ...]:
     return tuple(str(part) for part in key) if isinstance(key, tuple) else (str(key),)
+
+
+def _restore_training_states(states: tuple[tuple[torch.nn.Module, bool], ...]) -> None:
+    """Restore the exact training flag of every submodule in a module tree."""
+    for module, training in states:
+        module.training = training
 
 
 def _key_shapes(tensordict: TensorDictBase) -> dict[str, tuple[int, ...] | None]:

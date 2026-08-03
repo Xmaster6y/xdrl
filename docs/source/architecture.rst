@@ -47,6 +47,8 @@ without changing TorchRL's collector or trainer loops. An
 the role, phase, module path, declared I/O schemas, batch semantics,
 exploration/gradient/autocast configuration, and any supplied logical
 step/episode/trajectory identifiers. It contains neither tensors nor modules.
+``module_training`` optionally requests train or evaluation mode for the live
+call; the exact pre-existing mode of every submodule is restored afterwards.
 
 ``RuntimeInteractionContext`` is the matching ephemeral wrapper. Its
 construction checks a representative input against the declared input schema;
@@ -56,6 +58,62 @@ hook context even if the invocation raises. Its ordered ``before``, ``after``,
 and ``failure`` records retain only phase, module path, error text, and key
 shapes. An interaction identity must be stable within an execution record;
 event order is increasing within that identity.
+
+Execution-boundary support
+--------------------------
+
+The context itself is a one-shot callable, so a direct call and a local
+``SyncDataCollector`` policy can use the same object. It does not own a
+collector, rollout, replay buffer, optimiser, or trainer schedule.
+
+.. list-table:: Support matrix
+   :header-rows: 1
+
+   * - Boundary
+     - Typical model role
+     - TensorDict available
+     - Gradients available
+     - Lifecycle guarantee
+   * - Direct call
+     - Any
+     - Caller input/output
+     - Descriptor-controlled
+     - One before/after or failure pair per call
+   * - Synchronous collection
+     - Actor
+     - Current env step
+     - Normally disabled
+     - Main-process policy calls only
+   * - Evaluation rollout
+     - Actor/value
+     - Current env step
+     - Normally disabled
+     - Exploration and exact module modes restored
+   * - Replay-batch loss
+     - Loss/critic/value
+     - Sampled replay batch
+     - Usually enabled
+     - Context covers the loss-module call
+   * - Target/value estimate
+     - Value/critic
+     - Loss working batch
+     - Usually disabled
+     - Separate target interaction identity
+   * - Backward/optimisation
+     - Loss
+     - Loss output and gradients
+     - Enabled when requested
+     - Hooks live only while the context remains open
+
+For backward-time gradient observation, use the explicit context form and call
+``backward`` before leaving it. The one-shot callable necessarily removes
+temporary hooks after the forward call returns. Optimiser stepping remains a
+trainer responsibility and does not create a model invocation by itself.
+
+Only local synchronous calls are supported. Hooks installed in the main
+process are not propagated to worker copies. Multiprocessing and distributed
+collectors, compiled modules, and CUDA graphs are unsupported until their
+copying and lifecycle semantics are tested explicitly.
 
 Observation traces
 ------------------
