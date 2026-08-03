@@ -181,11 +181,7 @@ class RuntimeInteractionContext:
         stack = ExitStack()
         try:
             if self.descriptor.module_training is not None:
-                if not isinstance(self.module, torch.nn.Module):
-                    raise TypeError("module_training requires the interaction module to be a torch.nn.Module")
-                training_states = tuple((module, module.training) for module in self.module.modules())
-                stack.callback(_restore_training_states, training_states)
-                self.module.train(self.descriptor.module_training)
+                _set_training_mode(stack, self.module, self.descriptor.module_training)
             if self.descriptor.exploration_mode is not None:
                 stack.enter_context(set_exploration_type(self.descriptor.exploration_mode))
             stack.enter_context(torch.inference_mode(self.descriptor.inference_mode))
@@ -227,13 +223,16 @@ class RuntimeInteractionContext:
         """Invoke the wrapped module and append before/after/failure events."""
         if self._stack is None:
             raise RuntimeError("invoke must be called inside the interaction context")
+        invoked_module = self.module if module is None else module
+        if module is not None and module is not self.module and self.descriptor.module_training is not None:
+            _set_training_mode(self._stack, invoked_module, self.descriptor.module_training)
         self._record(LifecycleEventType.BEFORE, tensordict)
         try:
             self.input_schema.validate_inputs(tensordict)
             if self.interventions is not None:
                 tensordict = self.interventions.apply(self, tensordict, InterventionTiming.INPUT)
             self._capture_observations(tensordict, input=True)
-            result = (self.module if module is None else module)(tensordict)
+            result = invoked_module(tensordict)
         except BaseException as error:
             self._record(LifecycleEventType.FAILURE, tensordict, error)
             raise
@@ -286,6 +285,15 @@ def _restore_training_states(states: tuple[tuple[torch.nn.Module, bool], ...]) -
     """Restore the exact training flag of every submodule in a module tree."""
     for module, training in states:
         module.training = training
+
+
+def _set_training_mode(stack: ExitStack, module: object, training: bool) -> None:
+    """Apply a temporary mode to the module tree actually used for execution."""
+    if not isinstance(module, torch.nn.Module):
+        raise TypeError("module_training requires the invoked module to be a torch.nn.Module")
+    training_states = tuple((child, child.training) for child in module.modules())
+    stack.callback(_restore_training_states, training_states)
+    module.train(training)
 
 
 def _key_shapes(tensordict: TensorDictBase) -> dict[str, tuple[int, ...] | None]:

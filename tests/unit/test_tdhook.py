@@ -189,11 +189,13 @@ def test_gradient_interventions_replace_backpropagated_input_gradients(timing: I
 
 def test_intervention_paths_are_resolved_against_the_adapter_selection() -> None:
     interaction = _interaction(_policy())
+    interaction.descriptor = replace(interaction.descriptor, module_training=False)
     selected = TensorDictModule(
         torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 1)),
         in_keys=[("agents", "observation")],
         out_keys=[("agents", "action")],
     )
+    selected.train()
     intervention = Intervention(
         "selected-head",
         InterventionTarget.ACTIVATION,
@@ -207,6 +209,9 @@ def test_intervention_paths_are_resolved_against_the_adapter_selection() -> None
     with adapter.activate(factory) as active:
         result = active.invoke(interaction.representative_input.clone())
         assert torch.equal(result.get(("agents", "action")), torch.zeros(3, 2, 1))
+        assert not selected.training
+
+    assert selected.training
 
 
 class _TwoTensorOutputs(torch.nn.Module):
