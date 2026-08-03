@@ -115,6 +115,7 @@ class InteractionDescriptor:
     module_aliases: Mapping[str, str] = field(default_factory=dict)
     model_id: str | None = None
     checkpoint_id: str | None = None
+    module_training: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible representation with no tensors or modules."""
@@ -179,6 +180,8 @@ class RuntimeInteractionContext:
             raise RuntimeError("interaction context is already active")
         stack = ExitStack()
         try:
+            if self.descriptor.module_training is not None:
+                _set_training_mode(stack, self.module, self.descriptor.module_training)
             if self.descriptor.exploration_mode is not None:
                 stack.enter_context(set_exploration_type(self.descriptor.exploration_mode))
             stack.enter_context(torch.inference_mode(self.descriptor.inference_mode))
@@ -199,6 +202,17 @@ class RuntimeInteractionContext:
         self._stack = stack
         return self
 
+    def __call__(self, tensordict: TensorDictBase) -> TensorDictBase:
+        """Run one interaction, making the context usable as a synchronous policy.
+
+        This one-shot form is suitable for direct calls, deterministic rollouts,
+        and local :class:`~torchrl.collectors.SyncDataCollector` policies. Keep
+        the context open explicitly when hooks must remain installed through a
+        subsequent backward pass.
+        """
+        with self:
+            return self.invoke(tensordict)
+
     def __exit__(self, *exc_info: object) -> bool | None:
         if self._stack is None:
             return None
@@ -209,13 +223,16 @@ class RuntimeInteractionContext:
         """Invoke the wrapped module and append before/after/failure events."""
         if self._stack is None:
             raise RuntimeError("invoke must be called inside the interaction context")
+        invoked_module = self.module if module is None else module
+        if module is not None and module is not self.module and self.descriptor.module_training is not None:
+            _set_training_mode(self._stack, invoked_module, self.descriptor.module_training)
         self._record(LifecycleEventType.BEFORE, tensordict)
         try:
             self.input_schema.validate_inputs(tensordict)
             if self.interventions is not None:
                 tensordict = self.interventions.apply(self, tensordict, InterventionTiming.INPUT)
             self._capture_observations(tensordict, input=True)
-            result = (self.module if module is None else module)(tensordict)
+            result = invoked_module(tensordict)
         except BaseException as error:
             self._record(LifecycleEventType.FAILURE, tensordict, error)
             raise
@@ -262,6 +279,21 @@ class RuntimeInteractionContext:
 
 def _key_path(key: TensorDictKey) -> tuple[str, ...]:
     return tuple(str(part) for part in key) if isinstance(key, tuple) else (str(key),)
+
+
+def _restore_training_states(states: tuple[tuple[torch.nn.Module, bool], ...]) -> None:
+    """Restore the exact training flag of every submodule in a module tree."""
+    for module, training in states:
+        module.training = training
+
+
+def _set_training_mode(stack: ExitStack, module: object, training: bool) -> None:
+    """Apply a temporary mode to the module tree actually used for execution."""
+    if not isinstance(module, torch.nn.Module):
+        raise TypeError("module_training requires the invoked module to be a torch.nn.Module")
+    training_states = tuple((child, child.training) for child in module.modules())
+    stack.callback(_restore_training_states, training_states)
+    module.train(training)
 
 
 def _key_shapes(tensordict: TensorDictBase) -> dict[str, tuple[int, ...] | None]:
