@@ -213,10 +213,20 @@ def run_paired(
         raise InterventionValidationError(
             "paired executions must share interaction identity and checkpoint provenance"
         )
-    with baseline:
-        baseline_output = baseline.invoke(tensordict.clone())
-    with intervention:
-        intervention_output = intervention.invoke(tensordict.clone())
+    initial_rng_state = _rng_state()
+    post_baseline_rng_state = initial_rng_state
+    try:
+        with baseline:
+            baseline_output = baseline.invoke(tensordict.clone())
+        post_baseline_rng_state = _rng_state()
+        _set_rng_state(initial_rng_state)
+        with intervention:
+            intervention_output = intervention.invoke(tensordict.clone())
+    finally:
+        # A pair consumes the same random stream as one baseline invocation.
+        # This both matches stochastic executions and avoids leaking an extra
+        # random draw into the caller's next interaction.
+        _set_rng_state(post_baseline_rng_state)
     return PairedInterventionResult(
         baseline_descriptor.identity,
         baseline_descriptor.checkpoint_id,
@@ -237,14 +247,28 @@ class TDHookInterventionFactory(HookingContextFactory):
                 raise InterventionValidationError(
                     "TDHookInterventionFactory accepts activation or gradient interventions only"
                 )
-            if intervention.applies_to(interaction.descriptor):
-                assert intervention.module_path is not None
-                try:
-                    resolve_submodule_path(interaction.module, intervention.module_path)
-                except ValueError as error:
-                    raise InterventionValidationError(
-                        f"{intervention.identifier}: cannot resolve TDHook target {intervention.module_path!r}"
-                    ) from error
+            if (
+                intervention.applies_to(interaction.descriptor)
+                and intervention.target is InterventionTarget.GRADIENT
+                and (not interaction.descriptor.gradient_enabled or interaction.descriptor.inference_mode)
+            ):
+                raise InterventionValidationError(
+                    f"{intervention.identifier}: gradient interventions require gradient_enabled=True and inference_mode=False"
+                )
+
+    def prepare(self, module: Any, *args: Any, **kwargs: Any) -> Any:
+        """Validate paths against TDHook's selected module immediately before preparation."""
+        for intervention in self._interventions:
+            if not intervention.applies_to(self._interaction.descriptor):
+                continue
+            assert intervention.module_path is not None
+            try:
+                resolve_submodule_path(module, intervention.module_path)
+            except ValueError as error:
+                raise InterventionValidationError(
+                    f"{intervention.identifier}: cannot resolve TDHook target {intervention.module_path!r}"
+                ) from error
+        return super().prepare(module, *args, **kwargs)
 
     def _hook_module(self, module: HookedModule) -> MultiHookHandle:
         handles = []
@@ -268,13 +292,17 @@ class TDHookInterventionFactory(HookingContextFactory):
                         else kwargs["grad_output"]
                     )
                 )
-                value = container if isinstance(container, torch.Tensor) else container[-1]
-                if not isinstance(value, torch.Tensor):
+                if isinstance(container, torch.Tensor):
+                    return intervention.edit_tensor(container, label=f"TDHook target {intervention.module_path}")
+                tensor_indices = [index for index, value in enumerate(container) if isinstance(value, torch.Tensor)]
+                if len(tensor_indices) != 1:
                     raise InterventionValidationError(
-                        f"{intervention.identifier}: TDHook target {intervention.module_path!r} did not receive a tensor"
+                        f"{intervention.identifier}: TDHook target {intervention.module_path!r} received "
+                        f"{len(tensor_indices)} tensor values; select a module with one tensor input or output"
                     )
-                edited = intervention.edit_tensor(value, label=f"TDHook target {intervention.module_path}")
-                return edited if isinstance(container, torch.Tensor) else (*container[:-1], edited)
+                index = tensor_indices[0]
+                edited = intervention.edit_tensor(container[index], label=f"TDHook target {intervention.module_path}")
+                return (*container[:index], edited, *container[index + 1 :])
 
             handles.append(module.set(intervention.module_path, None, callback=callback, direction=direction))
         return MultiHookHandle(handles)
@@ -297,3 +325,14 @@ def _hook_direction(intervention: Intervention) -> str:
 
 def _display_key(key: TensorDictKey) -> str:
     return "/".join(key) if isinstance(key, tuple) else key
+
+
+def _rng_state() -> tuple[torch.Tensor, list[torch.Tensor] | None]:
+    """Snapshot CPU and, when present, every CUDA generator state."""
+    return torch.get_rng_state(), torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+
+
+def _set_rng_state(state: tuple[torch.Tensor, list[torch.Tensor] | None]) -> None:
+    torch.set_rng_state(state[0])
+    if state[1] is not None:
+        torch.cuda.set_rng_state_all(state[1])

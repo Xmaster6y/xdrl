@@ -260,6 +260,29 @@ def test_tensordict_interventions_are_checked_and_record_checkpoint_provenance()
     assert (record.interaction_id, record.checkpoint_id) == (descriptor.identity, "checkpoint-9")
 
 
+def test_paired_execution_reuses_randomness_for_a_no_op_intervention() -> None:
+    inputs, outputs = _schemas()
+    batch = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
+    policy = TensorDictModule(torch.nn.Dropout(p=0.5), in_keys=["observation"], out_keys=["action"])
+    descriptor = _descriptor(InteractionPhase.EVALUATION, inputs, outputs)
+    no_op = Intervention(
+        "control",
+        InterventionTarget.TENSORDICT,
+        InterventionTiming.OUTPUT,
+        transform=lambda value: value.clone(),
+        key="action",
+    )
+    baseline = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+    control = RuntimeInteractionContext(
+        descriptor, policy, inputs, outputs, batch, interventions=InterventionController((no_op,))
+    )
+
+    torch.manual_seed(7)
+    result = run_paired(baseline, control, batch)
+
+    assert torch.equal(result.baseline.get("action"), result.intervention.get("action"))
+
+
 def test_invalid_tensordict_interventions_fail_at_the_contract_boundary() -> None:
     inputs, outputs = _schemas()
     batch = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
