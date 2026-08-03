@@ -57,6 +57,25 @@ and ``failure`` records retain only phase, module path, error text, and key
 shapes. An interaction identity must be stable within an execution record;
 event order is increasing within that identity.
 
+Observation traces
+------------------
+
+``xdrl.observations`` adds bounded typed records around an interaction without
+changing its TensorDict invocation. ``ObservationTrace`` captures module input
+and output keys automatically when supplied to ``RuntimeInteractionContext``;
+hook users can record activations or gradients directly with
+``observe_tensor``. Each record includes interaction identity, phase, target,
+hook direction, nested key path, batch/time/agent semantics, and
+model/checkpoint identity and exploration metadata, but ``to_dict`` always excludes
+the optional tensor payload.
+
+``RetentionPolicy`` makes retention explicit: metadata-only is the default;
+detached or CPU snapshots clone their values and never retain computation
+graphs. Sampling and named ``mean``, ``sum``, or ``max`` batch reductions are
+opt-in. ``max_records`` plus an overflow policy bounds memory, while an
+optional callback supports streaming consumers. Probes and attribution remain
+external consumers of these records rather than becoming xdrl algorithms.
+
 TDHook instrumentation
 ----------------------
 

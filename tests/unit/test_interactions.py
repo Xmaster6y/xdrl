@@ -150,6 +150,24 @@ def test_context_rejects_schema_that_disagrees_with_descriptor() -> None:
         )
 
 
+def test_descriptor_model_identity_does_not_shift_existing_positional_fields() -> None:
+    inputs, outputs = _schemas()
+    descriptor = InteractionDescriptor(
+        "policy:collection:1",
+        ModelRole.ACTOR,
+        InteractionPhase.COLLECTION,
+        "policy.module",
+        SchemaSnapshot.from_schema(inputs),
+        SchemaSnapshot.from_schema(outputs),
+        ("env",),
+        "CartPole",
+    )
+
+    assert descriptor.batch_dimensions == ("env",)
+    assert descriptor.environment == "CartPole"
+    assert descriptor.model_id is None
+
+
 class _FailingPolicy:
     def __call__(self, tensordict: TensorDict) -> TensorDict:
         raise RuntimeError("policy failure")
