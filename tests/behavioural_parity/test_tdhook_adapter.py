@@ -14,9 +14,7 @@ def _interaction(*, lazy: bool = False) -> RuntimeInteractionContext:
     inputs = TensorDictSchema(
         (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),), BatchSemantics(("env",))
     )
-    outputs = TensorDictSchema(
-        (KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),), BatchSemantics(("env",))
-    )
+    outputs = TensorDictSchema((KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),), BatchSemantics(("env",)))
     layer: torch.nn.Module = torch.nn.LazyLinear(1, bias=False) if lazy else torch.nn.Linear(2, 1, bias=False)
     policy = TensorDictModule(layer, in_keys=["observation"], out_keys=["action"])
     batch = TensorDict({"observation": torch.tensor([[2.0, -1.0], [0.5, 3.0]])}, batch_size=[2])

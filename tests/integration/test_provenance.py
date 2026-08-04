@@ -11,9 +11,7 @@ def _descriptor() -> InteractionDescriptor:
     inputs = TensorDictSchema(
         (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),), BatchSemantics(("env",))
     )
-    outputs = TensorDictSchema(
-        (KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),), BatchSemantics(("env",))
-    )
+    outputs = TensorDictSchema((KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),), BatchSemantics(("env",)))
     return InteractionDescriptor(
         identity="policy:evaluation:0",
         role=ModelRole.ACTOR,

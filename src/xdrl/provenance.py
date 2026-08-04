@@ -111,9 +111,7 @@ class ProvenanceManifest:
                 interaction=dict(payload["interaction"]),
                 selected_keys=tuple(tuple(str(part) for part in key) for key in payload["selected_keys"]),
                 target_paths={str(key): str(value) for key, value in payload["target_paths"].items()},
-                exploration_mode=(
-                    None if payload["exploration_mode"] is None else str(payload["exploration_mode"])
-                ),
+                exploration_mode=(None if payload["exploration_mode"] is None else str(payload["exploration_mode"])),
                 gradient_enabled=bool(payload["gradient_enabled"]),
                 batch_dimensions=tuple(str(value) for value in payload["batch_dimensions"]),
                 tdhook_method=dict(payload["tdhook_method"]),
