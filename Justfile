@@ -5,6 +5,22 @@ install:
 checks:
 	uv run pre-commit run --all-files
 
+check-dependency-snapshot:
+	uv run python scripts/dependency_snapshot.py check
+
+sync-dependency-snapshot:
+	uv run python scripts/dependency_snapshot.py sync
+
+refresh-dependencies:
+	uv run python scripts/dependency_snapshot.py refresh
+	just dependency-gates
+
+dependency-gates:
+	just check-dependency-snapshot
+	just checks
+	just tests
+	just docs
+
 test-assets:
 	@echo "No test assets to resolve"
 

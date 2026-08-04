@@ -13,6 +13,7 @@ from importlib.metadata import PackageNotFoundError, distribution, version
 import json
 from typing import Any
 
+from packaging.markers import Marker
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
@@ -48,6 +49,11 @@ class VersionRequirement:
     distribution: str
     specifier: str
     support: SupportLevel = SupportLevel.SUPPORTED
+    marker: str | None = None
+
+    def applies(self) -> bool:
+        """Return whether this conditional requirement targets this runtime."""
+        return self.marker is None or Marker(self.marker).evaluate()
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +65,7 @@ class GitRevisionRequirement:
 
 
 SUPPORTED_PYTHON = VersionRequirement("python", ">=3.11,<3.14")
+# dependency-snapshot: start
 SUPPORTED_DEPENDENCIES = (
     VersionRequirement("torch", "==2.11.*"),
     VersionRequirement("tensordict", "==0.12.2"),
@@ -67,9 +74,10 @@ SUPPORTED_DEPENDENCIES = (
     VersionRequirement("xdrl", "==0.1.0"),
 )
 SUPPORTED_GIT_REVISIONS = (
-    GitRevisionRequirement("tdhook", "1a01cd3ea3bc04b9fe60877604d2116b610af108"),
     GitRevisionRequirement("torchrl", "5b2bc08b034bf228bfa8563629980b939d59b089"),
+    GitRevisionRequirement("tdhook", "dbb5e4ca37d5d6e2057bf22559746aad844c160d"),
 )
+# dependency-snapshot: end
 
 
 class ConformanceCheck(str, Enum):
@@ -158,6 +166,7 @@ def installed_dependency_versions() -> dict[str, str]:
     result = {
         requirement.distribution: _installed_version(requirement.distribution)
         for requirement in SUPPORTED_DEPENDENCIES
+        if requirement.applies()
     }
     result["python"] = ".".join(str(part) for part in sys.version_info[:3])
     return result
@@ -169,7 +178,8 @@ def validate_runtime_compatibility() -> dict[str, str]:
     _validate_version(SUPPORTED_PYTHON, python_version)
     versions = installed_dependency_versions()
     for requirement in SUPPORTED_DEPENDENCIES:
-        _validate_version(requirement, versions[requirement.distribution])
+        if requirement.applies():
+            _validate_version(requirement, versions[requirement.distribution])
     revisions = installed_dependency_revisions()
     for requirement in SUPPORTED_GIT_REVISIONS:
         if revisions[requirement.distribution] != requirement.commit:

@@ -67,7 +67,7 @@ build-backend = "setuptools.build_meta"
 default-groups = ["dev", "docs", "scripts"]
 
 [tool.uv.sources]
-tdhook = { git = "https://github.com/Xmaster6y/tdhook", rev = "1a01cd3ea3bc04b9fe60877604d2116b610af108" }
+tdhook = { git = "https://github.com/Xmaster6y/tdhook", branch = "main" }
 torchrl = { git = "https://github.com/Xmaster6y/rl", rev = "parity" }
 
 [tool.ruff]

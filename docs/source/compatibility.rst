@@ -30,16 +30,20 @@ Tested version matrix
 The lockfile is the reproducible source of exact revisions. The public runtime
 contract accepts only the following tested versions:
 
-================  =========================  ================================
-Component         Tested requirement         Evidence
-================  =========================  ================================
-Python            ``>=3.11,<3.14``           required CI matrix
-PyTorch           ``2.11.*``                 compatibility and parity suites
-TensorDict        ``0.12.2``                 schema and parity suites
-TorchRL           ``0.12.0+g5b2bc08b``       compatibility and integration
-TDHook            ``0.1.3``                  adapter conformance suite
-xdrl              ``0.1.0``                  all required suites
-================  =========================  ================================
+.. dependency-snapshot: start
+
+==========  ======================  ===============================
+Component   Tested requirement      Evidence
+==========  ======================  ===============================
+Python      ``>=3.11,<3.14``        required CI matrix
+PyTorch     ``==2.11.*``            compatibility and parity suites
+TensorDict  ``==0.12.2``            schema and parity suites
+TorchRL     ``==0.12.0+g5b2bc08b``  compatibility and integration
+TDHook      ``==0.1.3``             adapter conformance suite
+xdrl        ``==0.1.0``             all required suites
+==========  ======================  ===============================
+
+.. dependency-snapshot: end
 
 The current TorchRL and TDHook sources are Git revisions recorded in
 ``uv.lock``. A newly installable upstream revision remains experimental until
