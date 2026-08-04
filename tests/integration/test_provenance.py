@@ -1,4 +1,5 @@
 from dataclasses import replace
+import re
 
 import pytest
 
@@ -85,3 +86,31 @@ def test_provenance_rejects_non_serialisable_method_configuration() -> None:
             dependencies=_dependencies(),
             code_revision="6b9279a",
         )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("gradient_enabled", "false", "gradient_enabled must be a boolean"),
+        ("selected_keys", ["observation"], "selected_keys[0] must be a non-empty array"),
+        ("target_paths", [], "target_paths must be an object"),
+        ("tdhook_method", [], "tdhook_method must be an object"),
+        ("dependencies", {**_dependencies(), "torch": ""}, "dependencies.torch must be a non-empty string"),
+        ("dependencies", {**_dependencies(), "torch": "not-a-version"}, "dependencies.torch must be a valid version"),
+        ("model_id", 7, "model_id must be a non-empty string"),
+    ],
+)
+def test_provenance_rejects_malformed_field_types(field: str, value: object, message: str) -> None:
+    manifest = ProvenanceManifest.capture(
+        _descriptor(),
+        selected_keys=(("observation",),),
+        target_paths={},
+        tdhook_method={"name": "noop"},
+        dependencies=_dependencies(),
+        code_revision="6b9279a",
+    ).to_dict()
+    manifest[field] = value
+
+    with pytest.raises(ProvenanceSchemaError, match=re.escape(message)):
+        ProvenanceManifest.from_dict(manifest)

@@ -42,6 +42,7 @@ def test_observation_only_adapter_has_deterministic_output_and_schema_parity() -
 
     with adapter.activate(ActivationCaching(r"module")) as active:
         actual = active.invoke(batch.clone())
+        assert "module" in active.contexts[0].cache
 
     assert actual.batch_size == expected.batch_size
     assert set(actual.keys(include_nested=True, leaves_only=True)) == set(

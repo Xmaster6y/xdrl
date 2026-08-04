@@ -1,13 +1,19 @@
 from pathlib import Path
+import tomllib
 
 import pytest
 import torch
 from tensordict.nn import TensorDictModule
 from torchrl.trainers.algorithms.configs.common import _normalize_hydra_key
-from torchrl.trainers.algorithms.configs.trainers import _make_dqn_trainer, _make_ppo_trainer
+from torchrl.record.loggers.wandb import WandbLogger
 from torchrl.trainers.trainers import Trainer, _resolve_module
 
-from xdrl.compatibility import PRIVATE_UPSTREAM_APIS, validate_runtime_compatibility
+from xdrl.compatibility import (
+    PRIVATE_UPSTREAM_APIS,
+    SUPPORTED_GIT_REVISIONS,
+    installed_dependency_revisions,
+    validate_runtime_compatibility,
+)
 from xdrl.tdhook import _reject_unsupported_module
 
 
@@ -21,12 +27,12 @@ def test_private_upstream_inventory_is_owned_by_this_suite() -> None:
 
 
 @pytest.mark.upstream_compatibility
-def test_torchrl_private_surfaces_remain_available() -> None:
+def test_torchrl_private_surfaces_remain_available(tmp_path: Path) -> None:
     assert callable(_normalize_hydra_key)
     assert callable(_resolve_module)
     assert callable(Trainer._log)
-    assert callable(_make_ppo_trainer)
-    assert callable(_make_dqn_trainer)
+    logger = WandbLogger("private-api-compatibility", offline=True, save_dir=str(tmp_path))
+    assert logger._step_registry == {}
 
 
 @pytest.mark.upstream_compatibility
@@ -41,6 +47,13 @@ def test_compiled_module_marker_remains_fail_closed() -> None:
 @pytest.mark.upstream_compatibility
 def test_supported_runtime_matches_the_lockfile_matrix() -> None:
     versions = validate_runtime_compatibility()
+    revisions = installed_dependency_revisions()
+    lock = tomllib.loads(Path("uv.lock").read_text())
+    locked_sources = {
+        package["name"]: package["source"]["git"] for package in lock["package"] if "git" in package.get("source", {})
+    }
 
     assert set(versions) == {"python", "torch", "tensordict", "torchrl", "tdhook", "xdrl"}
-    assert Path("uv.lock").is_file()
+    assert revisions == {requirement.distribution: requirement.commit for requirement in SUPPORTED_GIT_REVISIONS}
+    for requirement in SUPPORTED_GIT_REVISIONS:
+        assert locked_sources[requirement.distribution].endswith(f"#{requirement.commit}")

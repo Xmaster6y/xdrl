@@ -68,11 +68,10 @@ Private upstream APIs
 
 ``PRIVATE_UPSTREAM_APIS`` is the machine-readable inventory. The owned uses are
 Torch's ``_orig_mod`` compiled-module marker and TorchRL's ``Trainer._log``,
-``_normalize_hydra_key``, ``_resolve_module``, ``_make_ppo_trainer``, and
-``_make_dqn_trainer`` surfaces, plus TorchRL's W&B logger ``_step_registry``.
-Their lockstep test is ``tests/upstream_compatibility/test_private_apis.py``;
-adding another private surface requires adding it to both the inventory and
-that owner suite.
+``_normalize_hydra_key``, and ``_resolve_module`` surfaces, plus TorchRL's W&B
+logger ``_step_registry``. Their lockstep test is
+``tests/upstream_compatibility/test_private_apis.py``; adding another private
+surface requires adding it to both the inventory and that owner suite.
 
 Provenance manifests
 --------------------

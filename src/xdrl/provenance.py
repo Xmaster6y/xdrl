@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
-from typing import Any, Mapping
+from typing import Any
+
+from packaging.version import InvalidVersion, Version
 
 from xdrl.compatibility import installed_dependency_versions
 from xdrl.interactions import InteractionDescriptor
@@ -34,7 +37,7 @@ class ProvenanceManifest:
     code_revision: str
 
     def __post_init__(self) -> None:
-        if self.schema_revision != PROVENANCE_SCHEMA_REVISION:
+        if type(self.schema_revision) is not int or self.schema_revision != PROVENANCE_SCHEMA_REVISION:
             raise ProvenanceSchemaError(
                 f"unsupported provenance schema revision {self.schema_revision}; expected {PROVENANCE_SCHEMA_REVISION}"
             )
@@ -42,9 +45,12 @@ class ProvenanceManifest:
             raise ProvenanceSchemaError("model_id must be non-empty")
         if not self.code_revision:
             raise ProvenanceSchemaError("code_revision must be non-empty")
-        missing = {"python", "torch", "tensordict", "torchrl", "tdhook", "xdrl"} - set(self.dependencies)
+        if not isinstance(self.dependencies, Mapping):
+            raise ProvenanceSchemaError("dependencies must be a mapping")
+        missing = _required_dependency_names() - set(self.dependencies)
         if missing:
             raise ProvenanceSchemaError(f"dependency provenance is missing: {', '.join(sorted(missing))}")
+        _validate_dependencies(self.dependencies)
         try:
             json.dumps(self.to_dict(), sort_keys=True)
         except (TypeError, ValueError) as error:
@@ -88,8 +94,10 @@ class ProvenanceManifest:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> ProvenanceManifest:
         """Decode a manifest, rejecting unknown revisions and malformed fields."""
+        if not isinstance(payload, Mapping):
+            raise ProvenanceSchemaError("provenance manifest must contain an object")
         revision = payload.get("schema_revision")
-        if revision != PROVENANCE_SCHEMA_REVISION:
+        if type(revision) is not int or revision != PROVENANCE_SCHEMA_REVISION:
             raise ProvenanceSchemaError(
                 f"unsupported provenance schema revision {revision!r}; expected {PROVENANCE_SCHEMA_REVISION}"
             )
@@ -103,23 +111,24 @@ class ProvenanceManifest:
             if unknown:
                 detail.append(f"unknown fields: {', '.join(sorted(unknown))}")
             raise ProvenanceSchemaError("; ".join(detail))
-        try:
-            return cls(
-                schema_revision=int(payload["schema_revision"]),
-                model_id=str(payload["model_id"]),
-                checkpoint_id=None if payload["checkpoint_id"] is None else str(payload["checkpoint_id"]),
-                interaction=dict(payload["interaction"]),
-                selected_keys=tuple(tuple(str(part) for part in key) for key in payload["selected_keys"]),
-                target_paths={str(key): str(value) for key, value in payload["target_paths"].items()},
-                exploration_mode=(None if payload["exploration_mode"] is None else str(payload["exploration_mode"])),
-                gradient_enabled=bool(payload["gradient_enabled"]),
-                batch_dimensions=tuple(str(value) for value in payload["batch_dimensions"]),
-                tdhook_method=dict(payload["tdhook_method"]),
-                dependencies={str(key): str(value) for key, value in payload["dependencies"].items()},
-                code_revision=str(payload["code_revision"]),
-            )
-        except (TypeError, ValueError) as error:
-            raise ProvenanceSchemaError(f"malformed provenance manifest: {error}") from error
+        interaction = _mapping(payload["interaction"], "interaction")
+        target_paths = _string_mapping(payload["target_paths"], "target_paths")
+        tdhook_method = _mapping(payload["tdhook_method"], "tdhook_method")
+        dependencies = _validate_dependencies(_string_mapping(payload["dependencies"], "dependencies"))
+        return cls(
+            schema_revision=revision,
+            model_id=_nonempty_string(payload["model_id"], "model_id"),
+            checkpoint_id=_optional_string(payload["checkpoint_id"], "checkpoint_id"),
+            interaction=dict(interaction),
+            selected_keys=_key_paths(payload["selected_keys"], "selected_keys"),
+            target_paths=target_paths,
+            exploration_mode=_optional_string(payload["exploration_mode"], "exploration_mode"),
+            gradient_enabled=_boolean(payload["gradient_enabled"], "gradient_enabled"),
+            batch_dimensions=_strings(payload["batch_dimensions"], "batch_dimensions"),
+            tdhook_method=dict(tdhook_method),
+            dependencies=dependencies,
+            code_revision=_nonempty_string(payload["code_revision"], "code_revision"),
+        )
 
     @classmethod
     def from_json(cls, payload: str) -> ProvenanceManifest:
@@ -131,3 +140,66 @@ class ProvenanceManifest:
         if not isinstance(value, dict):
             raise ProvenanceSchemaError("provenance JSON must contain an object")
         return cls.from_dict(value)
+
+
+def _required_dependency_names() -> set[str]:
+    return {"python", "torch", "tensordict", "torchrl", "tdhook", "xdrl"}
+
+
+def _mapping(value: Any, field: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
+        raise ProvenanceSchemaError(f"{field} must be an object with string keys")
+    return value
+
+
+def _string_mapping(value: Any, field: str) -> dict[str, str]:
+    mapping = _mapping(value, field)
+    return {key: _nonempty_string(item, f"{field}.{key}") for key, item in mapping.items()}
+
+
+def _validate_dependencies(value: Mapping[str, str]) -> dict[str, str]:
+    missing = _required_dependency_names() - set(value)
+    if missing:
+        raise ProvenanceSchemaError(f"dependency provenance is missing: {', '.join(sorted(missing))}")
+    dependencies = _string_mapping(value, "dependencies")
+    for name, dependency_version in dependencies.items():
+        try:
+            Version(dependency_version)
+        except InvalidVersion as error:
+            raise ProvenanceSchemaError(f"dependencies.{name} must be a valid version") from error
+    return dependencies
+
+
+def _nonempty_string(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ProvenanceSchemaError(f"{field} must be a non-empty string")
+    return value
+
+
+def _optional_string(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    return _nonempty_string(value, field)
+
+
+def _boolean(value: Any, field: str) -> bool:
+    if type(value) is not bool:
+        raise ProvenanceSchemaError(f"{field} must be a boolean")
+    return value
+
+
+def _strings(value: Any, field: str) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ProvenanceSchemaError(f"{field} must be an array")
+    return tuple(_nonempty_string(item, f"{field}[{index}]") for index, item in enumerate(value))
+
+
+def _key_paths(value: Any, field: str) -> tuple[tuple[str, ...], ...]:
+    if not isinstance(value, list):
+        raise ProvenanceSchemaError(f"{field} must be an array")
+    paths = []
+    for index, path in enumerate(value):
+        if not isinstance(path, list) or not path:
+            raise ProvenanceSchemaError(f"{field}[{index}] must be a non-empty array")
+        paths.append(tuple(_nonempty_string(part, f"{field}[{index}]") for part in path))
+    return tuple(paths)

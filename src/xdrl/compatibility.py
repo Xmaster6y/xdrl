@@ -9,7 +9,9 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from enum import Enum
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError, distribution, version
+import json
+from typing import Any
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
@@ -48,6 +50,14 @@ class VersionRequirement:
     support: SupportLevel = SupportLevel.SUPPORTED
 
 
+@dataclass(frozen=True, slots=True)
+class GitRevisionRequirement:
+    """An immutable Git revision exercised by the supported CI matrix."""
+
+    distribution: str
+    commit: str
+
+
 SUPPORTED_PYTHON = VersionRequirement("python", ">=3.11,<3.14")
 SUPPORTED_DEPENDENCIES = (
     VersionRequirement("torch", "==2.11.*"),
@@ -55,6 +65,10 @@ SUPPORTED_DEPENDENCIES = (
     VersionRequirement("torchrl", "==0.12.0+g5b2bc08b"),
     VersionRequirement("tdhook", "==0.1.3.dev0"),
     VersionRequirement("xdrl", "==0.1.0"),
+)
+SUPPORTED_GIT_REVISIONS = (
+    GitRevisionRequirement("tdhook", "f416f4c3a160e4e7b45f60360f8ce33c9c01682f"),
+    GitRevisionRequirement("torchrl", "5b2bc08b034bf228bfa8563629980b939d59b089"),
 )
 
 
@@ -131,20 +145,6 @@ PRIVATE_UPSTREAM_APIS = (
     ),
     PrivateAPIUsage(
         "torchrl",
-        "torchrl.trainers.algorithms.configs.trainers._make_ppo_trainer",
-        ("torchrl.trainers.algorithms.configs",),
-        "tests/upstream_compatibility/test_private_apis.py",
-        "Hydra target used by the advertised PPO configuration",
-    ),
-    PrivateAPIUsage(
-        "torchrl",
-        "torchrl.trainers.algorithms.configs.trainers._make_dqn_trainer",
-        ("torchrl.trainers.algorithms.configs",),
-        "tests/upstream_compatibility/test_private_apis.py",
-        "Hydra target used by the advertised DQN and QMIX configurations",
-    ),
-    PrivateAPIUsage(
-        "torchrl",
         "torchrl.record.loggers.wandb._step_registry",
         ("src/xdrl/trainer_hooks/logging.py",),
         "tests/upstream_compatibility/test_private_apis.py",
@@ -170,7 +170,22 @@ def validate_runtime_compatibility() -> dict[str, str]:
     versions = installed_dependency_versions()
     for requirement in SUPPORTED_DEPENDENCIES:
         _validate_version(requirement, versions[requirement.distribution])
+    revisions = installed_dependency_revisions()
+    for requirement in SUPPORTED_GIT_REVISIONS:
+        if revisions[requirement.distribution] != requirement.commit:
+            raise CompatibilityBoundaryError(
+                f"revision:{requirement.distribution}",
+                f"installed {revisions[requirement.distribution]!r}, tested revision is {requirement.commit!r}",
+            )
     return versions
+
+
+def installed_dependency_revisions() -> dict[str, str]:
+    """Return immutable Git revisions for dependencies pinned from source."""
+    return {
+        requirement.distribution: _installed_git_revision(requirement.distribution)
+        for requirement in SUPPORTED_GIT_REVISIONS
+    }
 
 
 def _installed_version(distribution: str) -> str:
@@ -178,6 +193,25 @@ def _installed_version(distribution: str) -> str:
         return version(distribution)
     except PackageNotFoundError as error:
         raise CompatibilityBoundaryError(f"dependency:{distribution}", "distribution is not installed") from error
+
+
+def _installed_git_revision(distribution_name: str) -> str:
+    try:
+        payload = distribution(distribution_name).read_text("direct_url.json")
+    except PackageNotFoundError as error:
+        raise CompatibilityBoundaryError(f"dependency:{distribution_name}", "distribution is not installed") from error
+    if payload is None:
+        raise CompatibilityBoundaryError(f"revision:{distribution_name}", "direct URL metadata is unavailable")
+    try:
+        direct_url: dict[str, Any] = json.loads(payload)
+        commit = direct_url["vcs_info"]["commit_id"]
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        raise CompatibilityBoundaryError(
+            f"revision:{distribution_name}", "Git commit metadata is unavailable"
+        ) from error
+    if not isinstance(commit, str) or not commit:
+        raise CompatibilityBoundaryError(f"revision:{distribution_name}", "Git commit metadata is invalid")
+    return commit
 
 
 def _validate_version(requirement: VersionRequirement, actual: str) -> None:

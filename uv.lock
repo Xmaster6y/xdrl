@@ -2821,7 +2821,7 @@ wheels = [
 [[package]]
 name = "tdhook"
 version = "0.1.3.dev0"
-source = { git = "https://github.com/Xmaster6y/tdhook#f416f4c3a160e4e7b45f60360f8ce33c9c01682f" }
+source = { git = "https://github.com/Xmaster6y/tdhook?rev=f416f4c3a160e4e7b45f60360f8ce33c9c01682f#f416f4c3a160e4e7b45f60360f8ce33c9c01682f" }
 dependencies = [
     { name = "tensordict" },
     { name = "torch" },
@@ -3431,8 +3431,8 @@ scripts = [
 
 [package.metadata]
 requires-dist = [
-    { name = "packaging", specifier = ">=25.0" },
-    { name = "tdhook", git = "https://github.com/Xmaster6y/tdhook" },
+    { name = "packaging", specifier = ">=21.0" },
+    { name = "tdhook", git = "https://github.com/Xmaster6y/tdhook?rev=f416f4c3a160e4e7b45f60360f8ce33c9c01682f" },
     { name = "torchrl", git = "https://github.com/Xmaster6y/rl?rev=parity" },
 ]
 
