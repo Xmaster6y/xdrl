@@ -26,6 +26,9 @@ jobs:
     - name: Install dependencies
       run: |
         uv sync --locked
+    - name: Check dependency snapshot drift
+      run: |
+        just check-dependency-snapshot
     - name: Run checks
       run: |
         just checks
