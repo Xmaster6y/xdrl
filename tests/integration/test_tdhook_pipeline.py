@@ -44,7 +44,17 @@ class CountingLinear(torch.nn.Linear):
         return super().forward(value)
 
 
-def _interaction() -> tuple[RuntimeInteractionContext, CountingLinear]:
+class StatefulTensorDictModule(TensorDictModule):
+    def __init__(self, module: torch.nn.Module) -> None:
+        super().__init__(module, in_keys=[INPUT_KEY], out_keys=[OUTPUT_KEY])
+        self.root_calls = 0
+
+    def forward(self, tensordict: TensorDict, **kwargs: object) -> TensorDict:
+        self.root_calls += 1
+        return super().forward(tensordict, **kwargs)
+
+
+def _interaction(*, stateful: bool = False) -> tuple[RuntimeInteractionContext, CountingLinear]:
     inputs = TensorDictSchema(
         (KeySchema(INPUT_KEY, KeyRole.OBSERVATION, KeyPresence.REQUIRED),),
         BatchSemantics(("env",)),
@@ -56,7 +66,11 @@ def _interaction() -> tuple[RuntimeInteractionContext, CountingLinear]:
     layer = CountingLinear()
     with torch.no_grad():
         layer.weight.copy_(torch.tensor([[2.0, -1.0]]))
-    policy = TensorDictModule(layer, in_keys=[INPUT_KEY], out_keys=[OUTPUT_KEY])
+    policy = (
+        StatefulTensorDictModule(layer)
+        if stateful
+        else TensorDictModule(layer, in_keys=[INPUT_KEY], out_keys=[OUTPUT_KEY])
+    )
     policy.train()
     batch = TensorDict({"inputs": {"input": torch.ones(3, 2)}}, batch_size=[3])
     descriptor = InteractionDescriptor(
@@ -180,3 +194,19 @@ def test_every_planned_call_revalidates_schema_and_restores_hooks_after_failure(
         LifecycleEventType.FAILURE,
     ]
     assert not layer._forward_hooks
+
+
+@pytest.mark.integration
+def test_planned_execution_preserves_root_module_state_and_identity() -> None:
+    interaction, _ = _interaction(stateful=True)
+    assert isinstance(interaction.module, StatefulTensorDictModule)
+    pipeline = Pipeline(
+        [_method("predict", HookingContextFactory(), required_keys=(INPUT_KEY,), provided_keys=(OUTPUT_KEY,))]
+    )
+
+    TDHookInteractionAdapter(interaction).run_pipeline(
+        pipeline, interaction.representative_input.clone(), code_revision="abc123"
+    )
+
+    assert type(interaction.module) is StatefulTensorDictModule
+    assert interaction.module.root_calls == 1

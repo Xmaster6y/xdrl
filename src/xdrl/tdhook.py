@@ -8,10 +8,9 @@ lifecycle handling.
 
 from __future__ import annotations
 
-from copy import copy
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 import torch
 from tensordict import TensorDictBase
@@ -176,10 +175,10 @@ class TDHookInteractionAdapter:
         """Execute a TDHook plan while validating every model call through XDRL.
 
         TDHook remains the sole owner of planning, stage grouping, artifacts,
-        pass counts, and hook lifecycle.  XDRL supplies a shallow execution
-        view of the selected module whose every forward call crosses the live
-        interaction contract.  The original direct-factory API remains
-        available through :meth:`activate`.
+        pass counts, and hook lifecycle. XDRL temporarily intercepts the
+        selected module's own forward method so every call crosses the live
+        interaction contract without changing the module identity. The
+        original direct-factory API remains available through :meth:`activate`.
         """
         if self._stack is not None:
             raise RuntimeError("run_pipeline cannot be used while the TDHook adapter is active")
@@ -192,8 +191,7 @@ class TDHookInteractionAdapter:
             raise RuntimeError("selected module has lazy parameters; call materialize() before run_pipeline()")
 
         planned = pipeline.plan(artifacts)
-        with self.interaction:
-            validated_model = _schema_validated_copy(self.selected_module, self.interaction)
+        with self.interaction, _schema_validated_module(self.selected_module, self.interaction) as validated_model:
             result = pipeline.run(
                 validated_model,
                 artifacts,
@@ -261,7 +259,7 @@ def _tdhook_path(path: str) -> str:
 
 
 class _SchemaValidatedForward:
-    """Mixin injected into a shallow module copy used only for one pipeline."""
+    """Mixin temporarily injected into the original module for one pipeline."""
 
     def forward(self, tensordict: TensorDictBase, *args: object, **kwargs: object) -> TensorDictBase:
         if args or kwargs:
@@ -275,22 +273,39 @@ class _SchemaValidatedForward:
         )
 
 
-def _schema_validated_copy(
+@contextmanager
+def _schema_validated_module(
     module: TensorDictModuleBase, interaction: RuntimeInteractionContext
-) -> TensorDictModuleBase:
-    """Preserve the module tree while intercepting its calls for validation."""
-    validated = copy(module)
+) -> Iterator[TensorDictModuleBase]:
+    """Intercept the original module in place and restore it after execution."""
     original_type = type(module)
     validated_type = type(f"_XDRLValidated{original_type.__name__}", (_SchemaValidatedForward, original_type), {})
+    missing = object()
+    previous_interaction = module.__dict__.get("_xdrl_interaction", missing)
+    previous_forward = module.__dict__.get("_xdrl_original_forward", missing)
+    changed_class = False
     try:
-        validated.__class__ = validated_type
+        module.__class__ = validated_type
+        changed_class = True
+        module._xdrl_interaction = interaction
+        module._xdrl_original_forward = original_type.forward
     except TypeError as error:
         raise NotImplementedError(
             f"planned TDHook execution cannot bind module type {original_type.__name__}"
         ) from error
-    validated._xdrl_interaction = interaction
-    validated._xdrl_original_forward = original_type.forward
-    return validated
+    try:
+        yield module
+    finally:
+        if previous_interaction is missing:
+            delattr(module, "_xdrl_interaction")
+        else:
+            module._xdrl_interaction = previous_interaction
+        if previous_forward is missing:
+            delattr(module, "_xdrl_original_forward")
+        else:
+            module._xdrl_original_forward = previous_forward
+        if changed_class:
+            module.__class__ = original_type
 
 
 def _tdhook_method_record(stage: Any, method: Any, plan: ExecutionPlan) -> dict[str, Any]:
