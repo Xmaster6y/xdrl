@@ -241,7 +241,7 @@ def validate_pytorch_sources(pyproject: Path = PYPROJECT) -> None:
             raise SnapshotError(f"PyTorch source refers to undeclared index {source.get('index')!r}")
     for python_version in ("3.11", "3.12", "3.13"):
         for sys_platform in ("darwin", "linux", "win32"):
-            environment = {"python_version": python_version, "sys_platform": sys_platform}
+            environment = _marker_environment(python_version, sys_platform)
             try:
                 matches = [source for source in torch_sources if Marker(source["marker"]).evaluate(environment)]
             except UndefinedEnvironmentName as error:
@@ -251,6 +251,29 @@ def validate_pytorch_sources(pyproject: Path = PYPROJECT) -> None:
                     "PyTorch source markers must select exactly one index for "
                     f"Python {python_version} on {sys_platform}; selected {len(matches)}"
                 )
+
+
+def _marker_environment(python_version: str, sys_platform: str) -> dict[str, str]:
+    """Return a deterministic marker environment for one supported CI leg."""
+    python_full_version = f"{python_version}.0"
+    os_name, platform_system = {
+        "darwin": ("posix", "Darwin"),
+        "linux": ("posix", "Linux"),
+        "win32": ("nt", "Windows"),
+    }[sys_platform]
+    return {
+        "implementation_name": "cpython",
+        "implementation_version": python_full_version,
+        "os_name": os_name,
+        "platform_machine": "x86_64",
+        "platform_python_implementation": "CPython",
+        "platform_release": "",
+        "platform_system": platform_system,
+        "platform_version": "",
+        "python_full_version": python_full_version,
+        "python_version": python_version,
+        "sys_platform": sys_platform,
+    }
 
 
 def _git_commit(source: str, name: str) -> str:

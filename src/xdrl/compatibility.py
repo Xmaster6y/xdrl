@@ -166,6 +166,7 @@ def installed_dependency_versions() -> dict[str, str]:
     result = {
         requirement.distribution: _installed_version(requirement.distribution)
         for requirement in SUPPORTED_DEPENDENCIES
+        if requirement.applies()
     }
     result["python"] = ".".join(str(part) for part in sys.version_info[:3])
     return result

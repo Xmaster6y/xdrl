@@ -149,6 +149,21 @@ url = "https://pypi.org/simple"
         validate_pytorch_sources(pyproject)
 
 
+def test_pytorch_markers_use_the_synthetic_full_python_and_platform_versions(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        """
+[tool.uv.sources]
+torch = [{ index = "stable", marker = "python_full_version in '3.11.0 3.12.0 3.13.0' and ((sys_platform == 'darwin' and platform_system == 'Darwin') or (sys_platform == 'linux' and platform_system == 'Linux') or (sys_platform == 'win32' and platform_system == 'Windows'))" }]
+[[tool.uv.index]]
+name = "stable"
+url = "https://pypi.org/simple"
+"""
+    )
+
+    validate_pytorch_sources(pyproject)
+
+
 def test_refresh_sources_accept_a_movable_git_branch(tmp_path: Path) -> None:
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
