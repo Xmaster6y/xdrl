@@ -14,6 +14,8 @@ Supported execution is local and synchronous: direct TensorDict module calls, sy
 
 Installation alone is not compatibility evidence. Call `validate_runtime_compatibility()` and name the relevant conformance suite before claiming support.
 
+`BatchSemantics` assigns semantic labels to positional leading TensorDict batch axes. For example, `BatchSemantics(("env",))` declares that the sole axis in `batch_size=[8]` means `env`; the runtime validates the number and order of axes, while TensorDict stores their positional sizes rather than their XDRL labels. Preserve that declared ordering when constructing batches and interpreting named reductions.
+
 ## Typed observation
 
 <!-- runnable-example -->
