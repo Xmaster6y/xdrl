@@ -67,7 +67,7 @@ assert result["action"].shape == (8, 2)
 assert trace.records and all(record.payload is None for record in trace.records)
 ```
 
-For opt-in payloads, construct `RetentionPolicy` with `TensorRetention.DETACHED` or `CPU`, named `DimensionReduction` operations, and a bounded record policy. Observation-only output parity is owned by `tests/behavioural_parity/test_tdhook_adapter.py`; tensor retention is not a license to keep unbounded rollout data.
+For opt-in payloads, construct `RetentionPolicy` with `TensorRetention.DETACHED` or `CPU`, named `DimensionReduction` operations, and a bounded record policy. The metadata-only trace flow above is exercised by `tests/unit/test_observations.py::test_trace_is_serialisable_and_observation_only_preserves_model_output`; TDHook adapter parity is covered separately by `tests/behavioural_parity/test_tdhook_adapter.py`. Tensor retention is not a license to keep unbounded rollout data.
 
 ## Checked intervention and paired execution
 

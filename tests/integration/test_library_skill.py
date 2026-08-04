@@ -61,5 +61,9 @@ def test_skill_is_versioned_and_names_evidence_boundaries() -> None:
     assert "xdrl.__version__" in skill
     assert f"xdrl=={xdrl.__version__.rsplit('.', 1)[0]}.*" in reference
     assert "Installation alone is not compatibility evidence" in reference
+    assert (
+        "tests/unit/test_observations.py::test_trace_is_serialisable_and_observation_only_preserves_model_output"
+        in reference
+    )
     assert "tests/behavioural_parity" in reference
     assert "compiled" in reference.casefold() and "distributed" in reference.casefold()
