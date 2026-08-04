@@ -13,6 +13,7 @@
     tutorials
     architecture
     compatibility
+    news-retirement
     api/index
     About <about>
 
@@ -37,9 +38,10 @@
 
             Hook-first interpretability for TorchRL
 
-        **xdrl** provides a small hook foundation for TorchRL trainer loops.
-        Today it covers logging, evaluation, GAE, validation, and policy checkpointing;
-        planned work explores ``tdhook``-powered probing, steering, attribution, and representation analysis.
+        **xdrl** provides typed interaction contracts and TDHook bindings for
+        TorchRL models. TorchRL continues to own trainer execution, logging,
+        evaluation, checkpointing, and environments; xdrl makes model-internal
+        observation and intervention explicit at those interaction boundaries.
 
         .. div:: button-group
 
@@ -78,9 +80,10 @@
 
         .. div::
 
-          **Trainer hooks**
+          **Typed interaction contracts**
 
-          Attach metrics, validation, and checkpointing logic at TorchRL trainer lifecycle points.
+          Describe model roles, TensorDict schemas, execution phases, and
+          batch semantics without replacing TorchRL's trainer lifecycle.
 
     .. grid-item::
 
@@ -91,6 +94,7 @@
 
         .. div::
 
-          **RL interpretability**
+          **TDHook-powered interpretability**
 
-          Planned TensorDict-native probing, steering, attribution, and representation workflows for TorchRL trainers.
+          Observe and intervene inside declared TorchRL model interactions with
+          TDHook while preserving native TensorDict behaviour.
