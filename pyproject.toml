@@ -9,6 +9,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "packaging>=21.0",
     "tdhook",
     "torchrl>=0.11.1",
 ]
@@ -66,9 +67,17 @@ build-backend = "setuptools.build_meta"
 default-groups = ["dev", "docs", "scripts"]
 
 [tool.uv.sources]
-tdhook = { git = "https://github.com/Xmaster6y/tdhook" }
+tdhook = { git = "https://github.com/Xmaster6y/tdhook", rev = "f416f4c3a160e4e7b45f60360f8ce33c9c01682f" }
 torchrl = { git = "https://github.com/Xmaster6y/rl", rev = "parity" }
 
 [tool.ruff]
 line-length = 119
 target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "upstream_compatibility: lockstep tests for private or version-sensitive upstream APIs",
+    "integration: tests spanning xdrl, TorchRL, TensorDict, and TDHook boundaries",
+    "behavioural_parity: deterministic comparison of instrumented and native execution",
+]

@@ -29,13 +29,31 @@ jobs:
     - name: Run checks
       run: |
         just checks
+    - name: Initialise coverage data
+      run: |
+        uv run coverage erase
+    - name: Run unit contract gate
+      run: |
+        uv run pytest tests/unit --cov=src --cov-append --junitxml=test-results-unit.xml -s -v
+    - name: Run upstream compatibility gate
+      run: |
+        uv run pytest tests/upstream_compatibility --cov=src --cov-append --junitxml=test-results-upstream.xml -s -v
+    - name: Run integration gate
+      run: |
+        uv run pytest tests/integration --cov=src --cov-append --junitxml=test-results-integration.xml -s -v
+    - name: Run behavioural parity gate
+      run: |
+        uv run pytest tests/behavioural_parity --cov=src --cov-append --junitxml=test-results-parity.xml -s -v
+    - name: Build documentation examples
+      run: |
+        just docs
     - name: Download assets
       run: |
         just test-assets
-    - name: Run tests
+    - name: Run coverage gate
       run: |
-        uv run pytest tests --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=50 \
-          --junitxml=test-results.xml -s -v
+        uv run coverage report --show-missing --fail-under=50
+        uv run coverage xml -o coverage.xml
     - name: Upload coverage reports to Codecov
       if: matrix.python-version == '3.11'
       uses: codecov/codecov-action@v5
@@ -48,4 +66,5 @@ jobs:
       uses: codecov/test-results-action@v1
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+        files: test-results-*.xml
         fail_ci_if_error: true
