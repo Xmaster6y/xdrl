@@ -12,6 +12,7 @@
     features
     tutorials
     architecture
+    compatibility
     api/index
     About <about>
 

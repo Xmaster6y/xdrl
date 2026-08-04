@@ -29,10 +29,25 @@ jobs:
     - name: Run checks
       run: |
         just checks
+    - name: Run unit contract gate
+      run: |
+        just test-unit
+    - name: Run upstream compatibility gate
+      run: |
+        just test-upstream-compatibility
+    - name: Run integration gate
+      run: |
+        just test-integration
+    - name: Run behavioural parity gate
+      run: |
+        just test-behavioural-parity
+    - name: Build documentation examples
+      run: |
+        just docs
     - name: Download assets
       run: |
         just test-assets
-    - name: Run tests
+    - name: Run coverage gate
       run: |
         uv run pytest tests --cov=src --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=50 \
           --junitxml=test-results.xml -s -v
