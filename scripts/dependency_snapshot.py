@@ -126,8 +126,7 @@ def documentation_block(snapshot: tuple[Dependency, ...]) -> str:
     body = [DOCUMENTATION_START, "", separator]
     body.append(
         "  ".join(
-            value.ljust(widths[index])
-            for index, value in enumerate(("Component", "Tested requirement", "Evidence"))
+            value.ljust(widths[index]) for index, value in enumerate(("Component", "Tested requirement", "Evidence"))
         ).rstrip()
     )
     body.append(separator)
@@ -159,7 +158,10 @@ def report(old: tuple[Dependency, ...], new: tuple[Dependency, ...]) -> str:
     """Return a review-oriented old/new snapshot table."""
     old_by_name = _group_snapshot(old)
     new_by_name = _group_snapshot(new)
-    lines = ["| Dependency | Old version | New version | Old revision | New revision |", "| --- | --- | --- | --- | --- |"]
+    lines = [
+        "| Dependency | Old version | New version | Old revision | New revision |",
+        "| --- | --- | --- | --- | --- |",
+    ]
     for name in TRACKED_DEPENDENCIES:
         previous = old_by_name[name]
         current = new_by_name[name]
@@ -261,7 +263,12 @@ def _specifier(dependency: Dependency) -> str:
 def _replace_block(text: str, start: str, end: str, replacement: str, path: Path) -> str:
     start_index = text.find(start)
     end_index = text.find(end, start_index + len(start))
-    if start_index < 0 or end_index < 0 or text.find(start, start_index + 1) >= 0 or text.find(end, end_index + 1) >= 0:
+    if (
+        start_index < 0
+        or end_index < 0
+        or text.find(start, start_index + 1) >= 0
+        or text.find(end, end_index + 1) >= 0
+    ):
         raise SnapshotError(f"expected exactly one generated snapshot block in {path}")
     end_index += len(end)
     return text[:start_index] + replacement + text[end_index:]

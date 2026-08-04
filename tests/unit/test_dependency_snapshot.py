@@ -24,7 +24,11 @@ def _write_lock(path: Path, *, tdhook_commit: str = "a" * 40) -> None:
     ]
     blocks = ["version = 1", "revision = 3"]
     for name, version, commit in packages:
-        source = f'{{ git = "https://example.invalid/{name}?branch=main#{commit}" }}' if commit else '{ registry = "https://pypi.org/simple" }'
+        source = (
+            f'{{ git = "https://example.invalid/{name}?branch=main#{commit}" }}'
+            if commit
+            else '{ registry = "https://pypi.org/simple" }'
+        )
         blocks.append(f'[[package]]\nname = "{name}"\nversion = "{version}"\nsource = {source}')
     path.write_text("\n\n".join(blocks) + "\n")
 
@@ -33,12 +37,12 @@ def _append_conditional_torch(path: Path) -> None:
     text = path.read_text().replace(
         'name = "torch"\nversion = "2.11.0"\nsource = { registry = "https://pypi.org/simple" }',
         'name = "torch"\nversion = "2.11.0"\nsource = { registry = "https://pypi.org/simple" }\n'
-        'resolution-markers = ["python_version == \'3.12\'"]',
+        "resolution-markers = [\"python_version == '3.12'\"]",
     )
     text += (
         '\n[[package]]\nname = "torch"\nversion = "2.12.0.dev1+cpu"\n'
         'source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }\n'
-        'resolution-markers = ["python_version != \'3.12\'"]\n'
+        "resolution-markers = [\"python_version != '3.12'\"]\n"
     )
     path.write_text(text)
 
