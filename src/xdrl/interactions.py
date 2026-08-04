@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 import torch
 from tensordict import TensorDictBase
@@ -338,6 +338,26 @@ class RuntimeInteractionContext:
         invoked_module = self.module if module is None else module
         if module is not None and module is not self.module and self.descriptor.module_training is not None:
             _set_training_mode(self._stack, invoked_module, self.descriptor.module_training)
+        return self.invoke_callable(tensordict, invoked_module)
+
+    def invoke_callable(
+        self,
+        tensordict: TensorDictBase,
+        operation: Callable[[TensorDictBase], TensorDictBase],
+        *,
+        module: object | None = None,
+    ) -> TensorDictBase:
+        """Invoke one TensorDict operation through this interaction's live contract.
+
+        This is the execution boundary used when another library owns the
+        model wrapper, as TDHook does for planned method calls.  The context
+        must already be active so execution modes and cleanup remain owned by
+        the surrounding interaction.
+        """
+        if self._stack is None:
+            raise RuntimeError("invoke_callable must be called inside the interaction context")
+        if module is not None and module is not self.module and self.descriptor.module_training is not None:
+            _set_training_mode(self._stack, module, self.descriptor.module_training)
         self._record(LifecycleEventType.BEFORE, tensordict)
         try:
             self.input_schema.validate_inputs(tensordict)
@@ -345,7 +365,7 @@ class RuntimeInteractionContext:
                 tensordict = self.interventions.apply(self, tensordict, InterventionTiming.INPUT)
             self._validate_recurrent_input(tensordict)
             self._capture_observations(tensordict, input=True)
-            result = invoked_module(tensordict)
+            result = operation(tensordict)
         except BaseException as error:
             self._record(LifecycleEventType.FAILURE, tensordict, error)
             raise

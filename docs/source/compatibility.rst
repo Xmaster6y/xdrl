@@ -37,7 +37,7 @@ Python            ``>=3.11,<3.14``           required CI matrix
 PyTorch           ``2.11.*``                 compatibility and parity suites
 TensorDict        ``0.12.2``                 schema and parity suites
 TorchRL           ``0.12.0+g5b2bc08b``       compatibility and integration
-TDHook            ``0.1.3.dev0``             adapter conformance suite
+TDHook            ``0.1.3``                  adapter conformance suite
 xdrl              ``0.1.0``                  all required suites
 ================  =========================  ================================
 
@@ -52,9 +52,11 @@ Adapter conformance
 ``tests/behavioural_parity/test_tdhook_adapter.py``. Its conformance contract
 covers TensorDict schema preservation, deterministic observation-only output
 parity, lifecycle cleanup, exception safety, explicit lazy materialisation, and
-target-path resolution. Compiled, distributed, remote, multiprocess, async,
-and distributed-collector paths remain unsupported and are rejected where they
-reach a known boundary.
+target-path resolution. ``tests/integration/test_tdhook_pipeline.py`` owns the
+planned-workflow boundary: TDHook-controlled grouping and pass counts, schema
+validation on every model call, artifact provenance, and failure cleanup.
+Compiled, distributed, remote, multiprocess, async, and distributed-collector
+paths remain unsupported and are rejected where they reach a known boundary.
 
 Test ownership is separated deliberately:
 

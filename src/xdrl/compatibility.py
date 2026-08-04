@@ -63,11 +63,11 @@ SUPPORTED_DEPENDENCIES = (
     VersionRequirement("torch", "==2.11.*"),
     VersionRequirement("tensordict", "==0.12.2"),
     VersionRequirement("torchrl", "==0.12.0+g5b2bc08b"),
-    VersionRequirement("tdhook", "==0.1.3.dev0"),
+    VersionRequirement("tdhook", "==0.1.3"),
     VersionRequirement("xdrl", "==0.1.0"),
 )
 SUPPORTED_GIT_REVISIONS = (
-    GitRevisionRequirement("tdhook", "f416f4c3a160e4e7b45f60360f8ce33c9c01682f"),
+    GitRevisionRequirement("tdhook", "1a01cd3ea3bc04b9fe60877604d2116b610af108"),
     GitRevisionRequirement("torchrl", "5b2bc08b034bf228bfa8563629980b939d59b089"),
 )
 

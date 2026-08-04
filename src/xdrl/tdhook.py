@@ -8,17 +8,19 @@ lifecycle handling.
 
 from __future__ import annotations
 
-from contextlib import ExitStack
-from dataclasses import dataclass, field
-from typing import Mapping, Sequence
+from contextlib import ExitStack, contextmanager
+from dataclasses import asdict, dataclass, field
+from typing import Any, Iterator, Mapping, Sequence
 
 import torch
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
 from tdhook.contexts import HookingContext, HookingContextFactory
 from tdhook.hooks import resolve_submodule_path
+from tdhook.pipeline import ExecutionPlan, Pipeline, PipelineResult
 
 from xdrl.interactions import RuntimeInteractionContext
+from xdrl.provenance import ProvenanceManifest
 from xdrl.types import KeyPresence, TensorDictKey
 
 
@@ -28,6 +30,27 @@ def _key_path(key: TensorDictKey) -> tuple[str, ...]:
 
 def _module_keys(module: TensorDictModuleBase, attribute: str) -> set[tuple[str, ...]]:
     return {_key_path(key) for key in getattr(module, attribute)}
+
+
+@dataclass(frozen=True, slots=True)
+class TDHookPipelineResult:
+    """A TDHook pipeline result linked to its typed XDRL interaction."""
+
+    pipeline: PipelineResult
+    interaction_provenance: tuple[ProvenanceManifest, ...]
+
+    @property
+    def artifacts(self) -> TensorDictBase:
+        """Return the artifacts produced by TDHook."""
+        return self.pipeline.artifacts
+
+    @property
+    def plan(self) -> ExecutionPlan:
+        """Return the exact TDHook plan used for execution."""
+        plan = self.pipeline.plan
+        if plan is None:
+            raise RuntimeError("TDHook pipeline result does not contain an execution plan")
+        return plan
 
 
 @dataclass(slots=True)
@@ -140,6 +163,56 @@ class TDHookInteractionAdapter:
             raise RuntimeError("invoke must be called inside an active TDHook adapter")
         return self.interaction.invoke(tensordict, module=self._hooked_module)
 
+    def run_pipeline(
+        self,
+        pipeline: Pipeline,
+        artifacts: TensorDictBase,
+        *,
+        code_revision: str,
+        seed: int | None = None,
+        stage_configurations: Mapping[str, Mapping[str, object]] | None = None,
+    ) -> TDHookPipelineResult:
+        """Execute a TDHook plan while validating every model call through XDRL.
+
+        TDHook remains the sole owner of planning, stage grouping, artifacts,
+        pass counts, and hook lifecycle. XDRL temporarily intercepts the
+        selected module's own forward method so every call crosses the live
+        interaction contract without changing the module identity. The
+        original direct-factory API remains available through :meth:`activate`.
+        """
+        if self._stack is not None:
+            raise RuntimeError("run_pipeline cannot be used while the TDHook adapter is active")
+        if not isinstance(pipeline, Pipeline):
+            raise TypeError(f"pipeline must be a TDHook Pipeline, got {type(pipeline).__name__}")
+        if not isinstance(artifacts, TensorDictBase):
+            raise TypeError(f"pipeline artifacts must be a TensorDict, got {type(artifacts).__name__}")
+        assert self.selected_module is not None
+        if _has_uninitialized_parameters(self.selected_module):
+            raise RuntimeError("selected module has lazy parameters; call materialize() before run_pipeline()")
+
+        planned = pipeline.plan(artifacts)
+        with self.interaction, _schema_validated_module(self.selected_module, self.interaction) as validated_model:
+            result = pipeline.run(
+                validated_model,
+                artifacts,
+                model_id=self.interaction.descriptor.model_id or self.interaction.descriptor.module_path,
+                seed=seed,
+                stage_configurations=stage_configurations,
+            )
+        if result.plan != planned:
+            raise RuntimeError("TDHook execution plan changed after preflight")
+        manifests = tuple(
+            ProvenanceManifest.capture(
+                self.interaction.descriptor,
+                selected_keys=tuple(_key_path(key) for key in (*self.input_keys, *self.output_keys)),
+                target_paths=self.target_paths,
+                tdhook_method=_tdhook_method_record(stage, method, planned),
+                code_revision=code_revision,
+            )
+            for stage, method in zip(result.stages, result.provenance, strict=True)
+        )
+        return TDHookPipelineResult(result, manifests)
+
     def _validate_selection(self) -> None:
         assert self.selected_module is not None
         model_inputs = _module_keys(self.selected_module, "in_keys")
@@ -183,6 +256,69 @@ def _require_subset(label: str, actual: set[tuple[str, ...]], expected: set[tupl
 
 def _tdhook_path(path: str) -> str:
     return "td_module" if not path else f"td_module.{path}"
+
+
+class _SchemaValidatedForward:
+    """Mixin temporarily injected into the original module for one pipeline."""
+
+    def forward(self, tensordict: TensorDictBase, *args: object, **kwargs: object) -> TensorDictBase:
+        if args or kwargs:
+            raise TypeError("planned XDRL interactions require one TensorDict positional argument")
+        interaction: RuntimeInteractionContext = self._xdrl_interaction
+        original_forward = self._xdrl_original_forward
+        return interaction.invoke_callable(
+            tensordict,
+            lambda current: original_forward(self, current),
+            module=self,
+        )
+
+
+@contextmanager
+def _schema_validated_module(
+    module: TensorDictModuleBase, interaction: RuntimeInteractionContext
+) -> Iterator[TensorDictModuleBase]:
+    """Intercept the original module in place and restore it after execution."""
+    original_type = type(module)
+    validated_type = type(f"_XDRLValidated{original_type.__name__}", (_SchemaValidatedForward, original_type), {})
+    missing = object()
+    previous_interaction = module.__dict__.get("_xdrl_interaction", missing)
+    previous_forward = module.__dict__.get("_xdrl_original_forward", missing)
+    changed_class = False
+    try:
+        module.__class__ = validated_type
+        changed_class = True
+        module._xdrl_interaction = interaction
+        module._xdrl_original_forward = original_type.forward
+    except TypeError as error:
+        raise NotImplementedError(
+            f"planned TDHook execution cannot bind module type {original_type.__name__}"
+        ) from error
+    try:
+        yield module
+    finally:
+        if previous_interaction is missing:
+            delattr(module, "_xdrl_interaction")
+        else:
+            module._xdrl_interaction = previous_interaction
+        if previous_forward is missing:
+            delattr(module, "_xdrl_original_forward")
+        else:
+            module._xdrl_original_forward = previous_forward
+        if changed_class:
+            module.__class__ = original_type
+
+
+def _tdhook_method_record(stage: Any, method: Any, plan: ExecutionPlan) -> dict[str, Any]:
+    planned_run = next(run for run in plan.runs if stage.name in run.stages)
+    record = asdict(method)
+    record["provided_keys"] = [_key_path(key) for key in stage.provided_keys]
+    record["planned_run"] = {
+        "stages": list(planned_run.stages),
+        "kind": planned_run.kind,
+        "model_passes": planned_run.model_passes,
+        "coalesced": planned_run.coalesced,
+    }
+    return record
 
 
 def _has_uninitialized_parameters(module: torch.nn.Module) -> bool:

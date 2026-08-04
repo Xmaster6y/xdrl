@@ -169,3 +169,10 @@ descriptor are exposed as stable TDHook target paths.
 Lazy modules must be explicitly materialised with ``adapter.materialize()``
 before ``adapter.activate(factory)``. Compiled, distributed, and remote modules
 are rejected instead of being instrumented with ambiguous semantics.
+
+Declared TDHook workflows use ``adapter.run_pipeline(pipeline, artifacts,
+code_revision=...)``. TDHook plans the workflow before execution and remains
+the owner of stage grouping, artifacts, pass counts, and hook cleanup. Every
+planned model call crosses the same live XDRL input/output schema and execution
+mode boundary, and the returned ``TDHookPipelineResult`` links TDHook's stage
+artifacts and plan to the interaction's model and checkpoint provenance.
