@@ -1,10 +1,10 @@
 Retiring the ``news`` design spike
 ==================================
 
-This is the final disposition report for GitHub issue #24.  The ``news``
-branch was exploratory design evidence, not an implementation source.  This
-report audits ``origin/main...origin/news`` at ``0f4d9f5`` and records what may
-be reused without merging or cherry-picking the branch.
+This is the final disposition report for GitHub issue #24.  The retired
+``news`` branch was exploratory design evidence, not an implementation source.
+This report audits ``origin/main...origin/news`` at ``0f4d9f5`` and records
+what may be reused without merging or cherry-picking the branch.
 
 Decision rule
 -------------
@@ -14,7 +14,8 @@ TorchRL owns trainers, collectors, environments, logging, checkpointing, and
 configuration-driven experiments; TDHook owns generic model-internal methods;
 ``xdrl`` owns typed interaction contracts and their TDHook binding.  A useful
 experiment is retained only as a requirement, independent conformance test,
-or upstream report within that boundary.
+or upstream report within that boundary.  No API, configuration, or behavioural
+compatibility with the retired spike is promised.
 
 Branch-only disposition
 -----------------------
@@ -92,6 +93,6 @@ Completion and deletion boundary
 --------------------------------
 
 This report, #35, and the already-linked roadmap issues are the preserved audit
-result.  The remote and local ``news`` refs are intentionally still present.
-Their deletion requires a separate explicit action after this audit PR has
-been reviewed; no branch deletion is part of this change.
+result.  The remote and local ``news`` refs were deleted after this audit was
+reviewed.  No branch history, implementation, or compatibility commitment is
+retained beyond the explicitly scoped requirements and upstream reports above.
