@@ -1,0 +1,4 @@
+interface:
+  display_name: "XDRL Library"
+  short_description: "Build typed, evidence-backed XDRL workflows"
+  default_prompt: "Use $xdrl-library to build a typed TorchRL interaction with XDRL."
