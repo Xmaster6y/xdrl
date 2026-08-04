@@ -52,7 +52,7 @@ from xdrl.observations import (
     TensorRetention,
 )
 from xdrl.provenance import PROVENANCE_SCHEMA_REVISION, ProvenanceManifest, ProvenanceSchemaError
-from xdrl.tdhook import TDHookInteractionAdapter
+from xdrl.tdhook import TDHookInteractionAdapter, TDHookPipelineResult
 from xdrl.types import ModelRole, TensorDictSchema
 
 try:
@@ -102,6 +102,7 @@ __all__ = [
     "SupportLevel",
     "PairedInterventionResult",
     "TDHookInteractionAdapter",
+    "TDHookPipelineResult",
     "TDHookInterventionFactory",
     "TensorDictSchema",
     "TensorRetention",

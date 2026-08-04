@@ -34,7 +34,7 @@ def _dependencies() -> dict[str, str]:
         "torch": "2.11.0",
         "tensordict": "0.12.2",
         "torchrl": "0.12.0+g5b2bc08b",
-        "tdhook": "0.1.3.dev0",
+        "tdhook": "0.1.3",
         "xdrl": "0.1.0",
     }
 
