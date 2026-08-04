@@ -111,9 +111,7 @@ def test_planned_compatible_stages_share_one_validated_interaction_call() -> Non
         ]
     )
 
-    result = TDHookInteractionAdapter(interaction).run_pipeline(
-        pipeline, artifacts, code_revision="abc123", seed=7
-    )
+    result = TDHookInteractionAdapter(interaction).run_pipeline(pipeline, artifacts, code_revision="abc123", seed=7)
 
     assert result.plan.model_passes == 1
     assert result.plan.runs[0].coalesced
