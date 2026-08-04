@@ -115,6 +115,26 @@ process are not propagated to worker copies. Multiprocessing and distributed
 collectors, compiled modules, and CUDA graphs are unsupported until their
 copying and lifecycle semantics are tested explicitly.
 
+Recurrent and multi-agent semantics
+-----------------------------------
+
+``RecurrentSemantics`` maps each current recurrent-state key to its produced
+``next`` key, names boolean reset masks, and records the time axis, burn-in,
+truncated window, and collector mode. Direct calls, synchronous collection,
+and replay sequences are the supported state lifecycles. Multiprocess,
+asynchronous, and distributed recurrent collectors fail at contract creation
+instead of implying that state and hooks propagate to worker copies.
+
+``MultiAgentSemantics`` separates implementation paths from semantic targets.
+It records independent, parameter-shared, centralised-critic, or mixer
+topology together with the TorchRL group, agent count, and a
+``SemanticTarget`` made from a model role and ``AgentSelector``. In
+particular, a shared policy path cannot stand in for a per-agent identity:
+targeting one or more agents is expressed only by the selector. Centralised
+critics use critic/value roles, and mixers use the mixer role. VMAS-style
+``("agents", ...)`` keys remain native TensorDict nested keys; the agent axis
+is named separately from environment and time batch axes.
+
 Observation traces
 ------------------
 
@@ -129,10 +149,12 @@ the optional tensor payload.
 
 ``RetentionPolicy`` makes retention explicit: metadata-only is the default;
 detached or CPU snapshots clone their values and never retain computation
-graphs. Sampling and named ``mean``, ``sum``, or ``max`` batch reductions are
-opt-in. ``max_records`` plus an overflow policy bounds memory, while an
-optional callback supports streaming consumers. Probes and attribution remain
-external consumers of these records rather than becoming xdrl algorithms.
+graphs. Sampling is opt-in. Each ``DimensionReduction`` pairs an explicit
+batch-dimension name (such as ``time`` or ``agent``) with a serialised
+``mean``, ``sum``, or ``max`` policy; dimensions are preserved by default.
+``max_records`` plus an overflow policy bounds memory, while an optional
+callback supports streaming consumers. Probes and attribution remain external
+consumers of these records rather than becoming xdrl algorithms.
 
 TDHook instrumentation
 ----------------------
