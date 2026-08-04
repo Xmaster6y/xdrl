@@ -24,13 +24,19 @@ def make_env(_name: str, **_kwargs: object) -> SimpleNamespace:
     )
     env.unwrapped = env
     env.reset = lambda *, seed=None, options=None: (np.zeros(1, dtype=np.float32), {})
-    env.step = lambda action: (
-        np.zeros(1, dtype=np.float32),
-        np.ones(2, dtype=np.float32),
-        bool(np.asarray(action)[0] > 0.5),
-        False,
-        {},
-    )
+
+    def step(action: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, object]]:
+        action_array = np.asarray(action, dtype=np.float32)
+        batch_shape = action_array.shape[:-1]
+        return (
+            np.zeros((*batch_shape, 1), dtype=np.float32),
+            np.ones((*batch_shape, 2), dtype=np.float32),
+            action_array[..., 0] > 0.5,
+            np.zeros(batch_shape, dtype=bool),
+            {},
+        )
+
+    env.step = step
     env.close = lambda: None
     return env
 
@@ -42,6 +48,7 @@ def main() -> None:
         transition = env.reset()
         transition.set("action", torch.tensor([[1.0], [0.0]], dtype=torch.float32))
         transition = env.step(transition)
+        assert transition.get(("next", "done")).squeeze(-1).tolist() == [True, False]
         env.step(TensorDict({"action": torch.zeros(2, 1)}, batch_size=transition.batch_size))
     finally:
         env.close()

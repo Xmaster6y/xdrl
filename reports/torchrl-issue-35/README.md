@@ -19,10 +19,11 @@ The commands target the exact lockfile revision:
 * TensorDict `0.12.2`;
 * PyTorch `2.11.0`.
 
-Each script asserts the desired upstream behaviour.  A failing assertion is
-therefore the reproduction to attach to an upstream report; a successful exit
-means that particular observation is no longer applicable at the pinned
-revision.  Do not add these to XDRL's supported conformance suite.
+Each script encodes the desired upstream behaviour. Some reproduce the issue
+by failing an assertion, while others reproduce it by raising the observed
+exception. A successful exit means that particular observation is no longer
+applicable at the pinned revision. Do not add these to XDRL's supported
+conformance suite.
 
 ## Report ledger
 

@@ -14,8 +14,12 @@ try:
         with warnings.catch_warnings(record=True) as captured:
             warnings.simplefilter("always")
             outer = TransformedEnv(inner, StepCounter())
-    messages = [str(warning.message) for warning in captured]
-    assert messages, "expected the auto-unwrap warning"
-    assert all("0.9" not in message for message in messages), messages
+    auto_unwrap_warnings = [
+        warning
+        for warning in captured
+        if issubclass(warning.category, UserWarning) and "automatically unwrapped" in str(warning.message)
+    ]
+    assert len(auto_unwrap_warnings) == 1, "expected exactly one auto-unwrap warning"
+    assert "0.9" not in str(auto_unwrap_warnings[0].message)
 finally:
     (outer or inner).close()
