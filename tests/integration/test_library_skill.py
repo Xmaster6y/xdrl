@@ -39,8 +39,7 @@ def test_skill_examples_use_the_installed_public_api(tmp_path: Path) -> None:
             "from pathlib import Path\n"
             "import xdrl\n"
             f"assert Path(xdrl.__file__).is_relative_to(Path({str(installed)!r}))\n"
-            f"assert xdrl.__version__ == {xdrl.__version__!r}\n"
-            + example
+            f"assert xdrl.__version__ == {xdrl.__version__!r}\n" + example
         )
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(installed)
