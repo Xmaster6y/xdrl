@@ -10,6 +10,7 @@ from scripts.dependency_snapshot import (
     documentation_block,
     read_snapshot,
     report,
+    validate_refresh_sources,
     validate_pytorch_sources,
 )
 
@@ -146,3 +147,29 @@ url = "https://pypi.org/simple"
 
     with pytest.raises(SnapshotError, match="select exactly one index"):
         validate_pytorch_sources(pyproject)
+
+
+def test_refresh_sources_accept_a_movable_git_branch(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        """
+[tool.uv.sources]
+tdhook = { git = "https://example.invalid/tdhook", branch = "main" }
+torchrl = { git = "https://example.invalid/rl", rev = "parity" }
+"""
+    )
+
+    validate_refresh_sources(pyproject)
+
+
+def test_refresh_sources_reject_an_immutable_git_revision(tmp_path: Path) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        f"""
+[tool.uv.sources]
+tdhook = {{ git = "https://example.invalid/tdhook", rev = "{"a" * 40}" }}
+"""
+    )
+
+    with pytest.raises(SnapshotError, match="pinned to an immutable commit"):
+        validate_refresh_sources(pyproject)

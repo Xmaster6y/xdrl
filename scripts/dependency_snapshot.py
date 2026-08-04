@@ -174,6 +174,7 @@ def report(old: tuple[Dependency, ...], new: tuple[Dependency, ...]) -> str:
 
 def refresh() -> int:
     """Resolve configured sources, synchronize declarations, and report the delta."""
+    validate_refresh_sources()
     validate_pytorch_sources()
     old = read_snapshot()
     command = ["uv", "lock"]
@@ -194,6 +195,7 @@ def refresh() -> int:
 
 def check() -> int:
     """Fail when the lock, declarations, or documented matrix disagree."""
+    validate_refresh_sources()
     validate_pytorch_sources()
     subprocess.run(("uv", "lock", "--check"), cwd=ROOT, check=True)
     changed = synchronize(read_snapshot(), check=True)
@@ -204,6 +206,21 @@ def check() -> int:
         return 1
     print("dependency snapshot is consistent")
     return 0
+
+
+def validate_refresh_sources(pyproject: Path = PYPROJECT) -> None:
+    """Reject Git source constraints that cannot advance during a refresh."""
+    payload = tomllib.loads(pyproject.read_text())
+    sources = payload.get("tool", {}).get("uv", {}).get("sources", {})
+    for package in REFRESH_PACKAGES:
+        source = sources.get(package)
+        if not isinstance(source, dict) or "git" not in source:
+            continue
+        revision = source.get("rev")
+        if isinstance(revision, str) and _is_commit(revision):
+            raise SnapshotError(
+                f"refresh-managed Git source {package!r} is pinned to an immutable commit; track a branch instead"
+            )
 
 
 def validate_pytorch_sources(pyproject: Path = PYPROJECT) -> None:
@@ -238,9 +255,13 @@ def validate_pytorch_sources(pyproject: Path = PYPROJECT) -> None:
 
 def _git_commit(source: str, name: str) -> str:
     _, separator, commit = source.rpartition("#")
-    if not separator or len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit.lower()):
+    if not separator or not _is_commit(commit):
         raise SnapshotError(f"Git package {name!r} has no immutable 40-character commit in uv.lock")
     return commit
+
+
+def _is_commit(value: str) -> bool:
+    return len(value) == 40 and all(character in "0123456789abcdef" for character in value.lower())
 
 
 def _resolution_marker(value: object, name: str) -> str | None:
