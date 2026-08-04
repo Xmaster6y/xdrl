@@ -28,6 +28,7 @@ from xdrl.interactions import (
     RecurrentSemantics,
     RecurrentStateTransition,
     RuntimeInteractionContext,
+    SchemaSnapshot,
     SemanticTarget,
 )
 from xdrl.interventions import (
@@ -53,7 +54,14 @@ from xdrl.observations import (
 )
 from xdrl.provenance import PROVENANCE_SCHEMA_REVISION, ProvenanceManifest, ProvenanceSchemaError
 from xdrl.tdhook import TDHookInteractionAdapter, TDHookPipelineResult
-from xdrl.types import ModelRole, TensorDictSchema
+from xdrl.types import (
+    BatchSemantics,
+    KeyPresence,
+    KeyRole,
+    KeySchema,
+    ModelRole,
+    TensorDictSchema,
+)
 
 try:
     __version__ = version("xdrl")
@@ -62,11 +70,14 @@ except PackageNotFoundError:
 
 __all__ = [
     "ADAPTER_CONFORMANCE",
+    "AgentSelector",
+    "BatchSemantics",
     "CompatibilityBoundaryError",
     "ConformanceCheck",
     "ConformanceSuite",
     "GitRevisionRequirement",
     "InteractionDescriptor",
+    "InteractionPhase",
     "InteractionTopology",
     "Intervention",
     "InterventionController",
@@ -75,8 +86,9 @@ __all__ = [
     "InterventionTarget",
     "InterventionTiming",
     "InterventionValidationError",
-    "InteractionPhase",
-    "AgentSelector",
+    "KeyPresence",
+    "KeyRole",
+    "KeySchema",
     "MultiAgentSemantics",
     "ModelRole",
     "ObservationKind",
@@ -94,6 +106,7 @@ __all__ = [
     "RecurrentStateTransition",
     "RetentionPolicy",
     "RuntimeInteractionContext",
+    "SchemaSnapshot",
     "SemanticTarget",
     "SUPPORTED_DEPENDENCIES",
     "SUPPORTED_GIT_REVISIONS",
