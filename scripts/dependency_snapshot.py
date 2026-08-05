@@ -20,19 +20,9 @@ PYPROJECT = ROOT / "pyproject.toml"
 COMPATIBILITY = ROOT / "src" / "xdrl" / "compatibility.py"
 COMPATIBILITY_START = "# dependency-snapshot: start"
 COMPATIBILITY_END = "# dependency-snapshot: end"
-DOCUMENTATION = ROOT / "docs" / "source" / "compatibility.rst"
-DOCUMENTATION_START = ".. dependency-snapshot: start"
-DOCUMENTATION_END = ".. dependency-snapshot: end"
 
 TRACKED_DEPENDENCIES = ("torch", "tensordict", "torchrl", "tdhook", "xdrl")
 REFRESH_PACKAGES = ("torch", "tensordict", "torchrl", "tdhook")
-EVIDENCE = {
-    "torch": "compatibility and parity suites",
-    "tensordict": "schema and parity suites",
-    "torchrl": "compatibility and integration",
-    "tdhook": "workflow conformance suite",
-    "xdrl": "all required suites",
-}
 
 
 class SnapshotError(RuntimeError):
@@ -104,45 +94,10 @@ def compatibility_block(snapshot: tuple[Dependency, ...]) -> str:
     )
 
 
-def documentation_block(snapshot: tuple[Dependency, ...]) -> str:
-    """Render the generated compatibility matrix rows."""
-    rows = [("Python", "``>=3.11,<3.14``", "required CI matrix")]
-    display_names = {
-        "torch": "PyTorch",
-        "tensordict": "TensorDict",
-        "torchrl": "TorchRL",
-        "tdhook": "TDHook",
-        "xdrl": "xdrl",
-    }
-    rows.extend(
-        (
-            display_names[item.name],
-            f"``{_specifier(item)}``",
-            EVIDENCE[item.name] + (f"; ``{item.marker}``" if item.marker is not None else ""),
-        )
-        for item in snapshot
-    )
-    widths = [max(len(row[column]) for row in rows) for column in range(3)]
-    separator = "  ".join("=" * width for width in widths)
-    body = [DOCUMENTATION_START, "", separator]
-    body.append(
-        "  ".join(
-            value.ljust(widths[index]) for index, value in enumerate(("Component", "Tested requirement", "Evidence"))
-        ).rstrip()
-    )
-    body.append(separator)
-    for component, requirement, evidence in rows:
-        values = (component, requirement, evidence)
-        body.append("  ".join(value.ljust(widths[index]) for index, value in enumerate(values)).rstrip())
-    body.extend((separator, "", DOCUMENTATION_END))
-    return "\n".join(body)
-
-
 def synchronize(snapshot: tuple[Dependency, ...], *, check: bool) -> list[Path]:
-    """Update or check all generated views of the lockfile snapshot."""
+    """Update or check the generated runtime compatibility declarations."""
     replacements = {
         COMPATIBILITY: (COMPATIBILITY_START, COMPATIBILITY_END, compatibility_block(snapshot)),
-        DOCUMENTATION: (DOCUMENTATION_START, DOCUMENTATION_END, documentation_block(snapshot)),
     }
     changed: list[Path] = []
     for path, (start, end, block) in replacements.items():

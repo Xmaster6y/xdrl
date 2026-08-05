@@ -7,7 +7,6 @@ from scripts.dependency_snapshot import (
     Dependency,
     SnapshotError,
     compatibility_block,
-    documentation_block,
     read_snapshot,
     report,
     validate_refresh_sources,
@@ -79,7 +78,7 @@ def test_read_snapshot_preserves_conditional_stable_and_nightly_versions(tmp_pat
     assert torch[1].marker == "(python_version != '3.12')"
 
 
-def test_generated_views_share_the_same_snapshot() -> None:
+def test_runtime_compatibility_declarations_use_the_lock_snapshot() -> None:
     snapshot = (
         Dependency("torch", "2.11.0", None),
         Dependency("tensordict", "0.12.2", None),
@@ -89,11 +88,8 @@ def test_generated_views_share_the_same_snapshot() -> None:
     )
 
     declarations = compatibility_block(snapshot)
-    documentation = documentation_block(snapshot)
-
     assert 'VersionRequirement("torch", "==2.11.*")' in declarations
     assert 'GitRevisionRequirement("torchrl", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")' in declarations
-    assert "``==0.12.0+g12345678``" in documentation
 
 
 def test_generated_views_pin_pytorch_prereleases_exactly() -> None:
