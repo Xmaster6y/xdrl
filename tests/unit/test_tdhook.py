@@ -6,7 +6,8 @@ from tdhook.execution import ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching
 from tdhook.workflow import Workflow
 
-from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext, SchemaSnapshot
+from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
+from xdrl.provenance import ProvenanceSchemaError
 from xdrl.tdhook import TDHookWorkflowRunner
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
@@ -23,16 +24,15 @@ def _interaction(*, lazy: bool = False) -> RuntimeInteractionContext:
     layer: torch.nn.Module = torch.nn.LazyLinear(1, bias=False) if lazy else torch.nn.Linear(2, 1, bias=False)
     policy = TensorDictModule(layer, in_keys=[("agents", "observation")], out_keys=[("agents", "action")])
     batch = TensorDict({("agents", "observation"): torch.ones(3, 2, 2)}, batch_size=[3, 2])
-    descriptor = InteractionDescriptor(
+    contract = InteractionContract(
         "policy:evaluation:0",
         ModelRole.ACTOR,
         InteractionPhase.EVALUATION,
         "policy",
-        SchemaSnapshot.from_schema(inputs),
-        SchemaSnapshot.from_schema(outputs),
-        batch_dimensions=("env", "agent"),
+        inputs,
+        outputs,
     )
-    return RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+    return RuntimeInteractionContext(contract, policy, batch)
 
 
 def test_workflow_preserves_nested_batched_tensordict_execution() -> None:
@@ -43,22 +43,33 @@ def test_workflow_preserves_nested_batched_tensordict_execution() -> None:
     expected = interaction.module(data.clone()).get(("agents", "action")).clone()
     workflow = Workflow(ActivationCaching("module", cache_key=("activations", "head")))
 
-    execution = TDHookWorkflowRunner(interaction).run(workflow, data)
+    execution = TDHookWorkflowRunner(interaction).run(workflow, data, code_revision="test-revision")
 
     assert torch.equal(execution.data.get(("agents", "action")), expected)
     assert "module" in execution.data.get(("activations", "head"))
     assert execution.plan.model_passes == 1
-    assert execution.record.model_calls == 1
+    assert execution.provenance.model_calls == 1
     assert not interaction.module.module._forward_hooks
 
 
 def test_runner_rejects_contract_mismatches_and_invalid_boundaries() -> None:
     runner = TDHookWorkflowRunner(_interaction())
     with pytest.raises(TypeError, match="workflow must"):
-        runner.run(object(), runner.interaction.representative_input)  # type: ignore[arg-type]
+        runner.run(object(), runner.interaction.representative_input, code_revision="test-revision")  # type: ignore[arg-type]
     bad = TensorDict({"other": torch.ones(3, 2, 2)}, batch_size=[3, 2])
     with pytest.raises(ValueError, match="missing required key"):
         runner.plan(Workflow(ActivationCaching("module")), bad)
+
+
+def test_runner_rejects_invalid_provenance_metadata_before_execution() -> None:
+    runner = TDHookWorkflowRunner(_interaction())
+    workflow = Workflow(ActivationCaching("module"))
+
+    with pytest.raises(ProvenanceSchemaError, match="code_revision"):
+        runner.run(workflow, runner.interaction.representative_input.clone(), code_revision=" ")
+
+    assert not runner.interaction.events
+    assert not runner.interaction.module.module._forward_hooks
 
 
 def test_lazy_modules_require_explicit_materialisation() -> None:
@@ -67,7 +78,7 @@ def test_lazy_modules_require_explicit_materialisation() -> None:
     with pytest.raises(RuntimeError, match="materialize"):
         runner.plan(workflow, runner.interaction.representative_input)
     runner.materialize()
-    runner.run(workflow, runner.interaction.representative_input.clone())
+    runner.run(workflow, runner.interaction.representative_input.clone(), code_revision="test-revision")
 
 
 def test_runner_rejects_compiled_descendants() -> None:
@@ -87,4 +98,4 @@ def test_workflow_gradient_requirements_must_match_the_rl_interaction() -> None:
     runner = TDHookWorkflowRunner(_interaction())
     workflow = Workflow(_RequiredGradientCaching("module"))
     with pytest.raises(ValueError, match="gradient-required"):
-        runner.run(workflow, runner.interaction.representative_input.clone())
+        runner.run(workflow, runner.interaction.representative_input.clone(), code_revision="test-revision")

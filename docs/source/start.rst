@@ -21,14 +21,13 @@ The following example is exercised by
 
    from xdrl import (
        BatchSemantics,
-       InteractionDescriptor,
+       InteractionContract,
        InteractionPhase,
        KeyPresence,
        KeyRole,
        KeySchema,
        ModelRole,
        RuntimeInteractionContext,
-       SchemaSnapshot,
        TDHookWorkflowRunner,
        TensorDictSchema,
    )
@@ -47,28 +46,32 @@ The following example is exercised by
        out_keys=["action"],
    )
    batch = TensorDict({"observation": torch.randn(8, 4)}, batch_size=[8])
-   descriptor = InteractionDescriptor(
+   contract = InteractionContract(
        identity="policy:evaluation:0",
        role=ModelRole.ACTOR,
        phase=InteractionPhase.EVALUATION,
        module_path="policy",
-       input_schema=SchemaSnapshot.from_schema(inputs),
-       output_schema=SchemaSnapshot.from_schema(outputs),
-       batch_dimensions=("env",),
+       input_schema=inputs,
+       output_schema=outputs,
        module_training=False,
    )
-   interaction = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+   interaction = RuntimeInteractionContext(contract, policy, batch)
 
    workflow = Workflow(
        ActivationCaching("module", cache_key=("activations", "head"))
    )
    runner = TDHookWorkflowRunner(interaction)
    plan = runner.plan(workflow, batch.clone())
-   execution = runner.run(workflow, batch.clone(), expected_plan=plan)
+   execution = runner.run(
+       workflow,
+       batch.clone(),
+       code_revision="example-revision",
+       expected_plan=plan,
+   )
 
    assert execution.data["action"].shape == (8, 2)
    assert "module" in execution.data["activations", "head"]
-   assert execution.record.model_calls == plan.model_passes == 1
+   assert execution.provenance.model_calls == plan.model_passes == 1
 
    target = Target("module", "activation", -1, (0, 1))
    with interaction, HookSession(policy) as session:

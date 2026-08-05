@@ -72,7 +72,8 @@ Workflow conformance
 ``tests/behavioural_parity/test_tdhook_workflow.py``. Its conformance contract
 covers TensorDict schema preservation, deterministic observation-only output
 parity, lifecycle cleanup, exception safety, explicit lazy materialisation,
-plan delegation, and model-pass accounting.
+plan delegation, model-pass accounting, and deterministic provenance
+round-tripping.
 ``tests/integration/test_tdhook_workflow.py`` owns the declared-workflow
 boundary: TDHook-controlled coexecution, schema validation on every actual
 model call, module identity preservation, plan agreement, and cleanup.
@@ -95,17 +96,16 @@ adapter reject compiled descendants before installing hooks. Its lockstep test
 is ``tests/upstream_compatibility/test_private_apis.py``; adding another private
 surface requires adding it to both the inventory and that owner suite.
 
-Provenance manifests
---------------------
+Workflow provenance
+-------------------
 
-``ProvenanceManifest`` records the model and checkpoint identifiers, complete
-serialised interaction descriptor, selected TensorDict keys, resolved TDHook
-paths and method configuration, exploration and gradient modes, batch
-semantics, dependency versions, and code revision. ``to_json()`` is
-deterministic and ``from_json()`` rejects unknown schema revisions, missing or
-unknown fields, incomplete dependency provenance, and non-serialisable method
-configuration. A manifest establishes reproducibility metadata; it does not by
-itself establish that an adapter is supported.
+``WorkflowProvenance`` records only evidence XDRL can verify from public APIs:
+the interaction contract's tensor-free projection, TDHook plan, XDRL lifecycle
+events, dependency versions, code revision, and optional seed. ``to_json()``
+is deterministic and ``from_json()`` rejects unknown schema revisions,
+malformed fields, incomplete dependencies, and plan-to-call disagreement. It
+does not claim to be TDHook method configuration or artifact provenance, and it
+does not by itself establish support or scientific validity.
 
 Documentation examples are built in the same required CI workflow as the test
 gates. Examples must name their support level and conformance suite; dependency

@@ -5,7 +5,7 @@ from tensordict.nn import TensorDictModule
 from tdhook.latent import ActivationCaching
 from tdhook.workflow import PlannedExecution, Workflow, WorkflowPlan
 
-from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext, SchemaSnapshot
+from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 from xdrl.tdhook import TDHookWorkflowRunner
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
@@ -47,19 +47,18 @@ def _interaction(*, stateful: bool = False) -> tuple[RuntimeInteractionContext, 
     )
     policy.train()
     batch = TensorDict({"observation": torch.ones(3, 2)}, batch_size=[3])
-    descriptor = InteractionDescriptor(
+    contract = InteractionContract(
         "policy:evaluation:workflow",
         ModelRole.ACTOR,
         InteractionPhase.EVALUATION,
         "policy",
-        SchemaSnapshot.from_schema(inputs),
-        SchemaSnapshot.from_schema(outputs),
-        batch_dimensions=("env",),
+        inputs,
+        outputs,
         model_id="actor-v3",
         checkpoint_id="sha256:workflow",
         module_training=False,
     )
-    return RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch), layer
+    return RuntimeInteractionContext(contract, policy, batch), layer
 
 
 @pytest.mark.integration
@@ -72,14 +71,19 @@ def test_compatible_capture_methods_share_one_validated_model_call() -> None:
     runner = TDHookWorkflowRunner(interaction)
     plan = runner.plan(workflow, interaction.representative_input.clone())
 
-    execution = runner.run(workflow, interaction.representative_input.clone(), expected_plan=plan)
+    execution = runner.run(
+        workflow,
+        interaction.representative_input.clone(),
+        code_revision="test-revision",
+        expected_plan=plan,
+    )
 
     assert plan.model_passes == 1
     assert plan.executions[0].coexecuted
     assert layer.calls == 1
     assert layer.training_during_calls == [False]
     assert interaction.module.training
-    assert execution.record.model_calls == 1
+    assert execution.provenance.model_calls == 1
     assert "module" in execution.data.get(("activations", "first"))
     assert "module" in execution.data.get(("activations", "second"))
     assert not layer._forward_hooks
@@ -90,7 +94,9 @@ def test_workflow_preserves_root_module_type_and_state() -> None:
     interaction, _ = _interaction(stateful=True)
     workflow = Workflow(ActivationCaching("module", cache_key=("activations", "head")))
 
-    TDHookWorkflowRunner(interaction).run(workflow, interaction.representative_input.clone())
+    TDHookWorkflowRunner(interaction).run(
+        workflow, interaction.representative_input.clone(), code_revision="test-revision"
+    )
 
     assert type(interaction.module) is StatefulTensorDictModule
     assert interaction.module.root_calls == 1
@@ -119,6 +125,8 @@ def test_planned_and_observed_model_passes_must_match() -> None:
     workflow = _DishonestWorkflow(ActivationCaching("module"))
 
     with pytest.raises(RuntimeError, match="model-pass mismatch"):
-        TDHookWorkflowRunner(interaction).run(workflow, interaction.representative_input.clone())
+        TDHookWorkflowRunner(interaction).run(
+            workflow, interaction.representative_input.clone(), code_revision="test-revision"
+        )
 
     assert not interaction.module._forward_hooks

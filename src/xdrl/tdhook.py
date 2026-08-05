@@ -8,46 +8,25 @@ plan-to-call-count evidence around every actual root model call.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from typing import Any
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 import torch
 from tensordict import TensorDictBase
 from tdhook.execution import GradientMode
 from tdhook.workflow import Workflow, WorkflowPlan
 
-from xdrl.interactions import LifecycleEvent, LifecycleEventType, RuntimeInteractionContext
-
-
-@dataclass(frozen=True, slots=True)
-class WorkflowRunRecord:
-    """Tensor-free evidence associating one TDHook plan with an RL interaction."""
-
-    interaction_id: str
-    plan: WorkflowPlan
-    events: tuple[LifecycleEvent, ...]
-
-    @property
-    def model_calls(self) -> int:
-        """Return the number of successful root model calls observed by XDRL."""
-        return sum(event.kind is LifecycleEventType.AFTER for event in self.events)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-compatible projection of the public plan and events."""
-        return asdict(self)
+from xdrl.interactions import LifecycleEventType, RuntimeInteractionContext
+from xdrl.provenance import WorkflowProvenance
 
 
 @dataclass(frozen=True, slots=True)
 class TDHookWorkflowResult:
-    """The native TDHook TensorDict result paired with XDRL execution evidence."""
+    """Native TDHook output, exact plan, and versioned XDRL provenance."""
 
     data: TensorDictBase
-    record: WorkflowRunRecord
-
-    @property
-    def plan(self) -> WorkflowPlan:
-        """Return the exact public TDHook plan associated with this execution."""
-        return self.record.plan
+    plan: WorkflowPlan
+    provenance: WorkflowProvenance
 
 
 @dataclass(slots=True)
@@ -79,10 +58,18 @@ class TDHookWorkflowRunner:
         workflow: Workflow,
         data: TensorDictBase,
         *,
+        code_revision: str,
         expected_plan: WorkflowPlan | None = None,
+        seed: int | None = None,
+        dependencies: Mapping[str, str] | None = None,
     ) -> TDHookWorkflowResult:
-        """Execute ``workflow`` while validating every actual root model call."""
+        """Execute ``workflow`` and capture versioned plan-to-call provenance."""
         self._validate_boundary(workflow, data)
+        validated_dependencies = WorkflowProvenance.validate_run_metadata(
+            code_revision=code_revision,
+            seed=seed,
+            dependencies=dependencies,
+        )
         plan = workflow.plan(self.interaction.module, data)
         if expected_plan is not None and plan != expected_plan:
             raise RuntimeError("TDHook workflow plan changed after caller preflight")
@@ -91,13 +78,20 @@ class TDHookWorkflowRunner:
         with self.interaction, self.interaction.observe_module_calls():
             result = workflow.run(self.interaction.module, data)
         events = tuple(self.interaction.events[event_start:])
-        record = WorkflowRunRecord(self.interaction.descriptor.identity, plan, events)
-        if record.model_calls != plan.model_passes:
+        model_calls = sum(event.kind is LifecycleEventType.AFTER for event in events)
+        if model_calls != plan.model_passes:
             raise RuntimeError(
-                "TDHook workflow model-pass mismatch: "
-                f"plan declares {plan.model_passes}, XDRL observed {record.model_calls}"
+                f"TDHook workflow model-pass mismatch: plan declares {plan.model_passes}, XDRL observed {model_calls}"
             )
-        return TDHookWorkflowResult(result, record)
+        provenance = WorkflowProvenance.capture(
+            self.interaction.contract,
+            plan,
+            events,
+            code_revision=code_revision,
+            seed=seed,
+            dependencies=validated_dependencies,
+        )
+        return TDHookWorkflowResult(result, plan, provenance)
 
     def _validate_boundary(self, workflow: Workflow, data: TensorDictBase) -> None:
         if not isinstance(workflow, Workflow):
@@ -109,15 +103,15 @@ class TDHookWorkflowRunner:
         self.interaction.input_schema.validate_inputs(data)
 
     def _validate_gradient_contract(self, plan: WorkflowPlan) -> None:
-        descriptor = self.interaction.descriptor
+        contract = self.interaction.contract
         for execution in plan.executions:
             if execution.gradient_mode is GradientMode.REQUIRED and (
-                not descriptor.gradient_enabled or descriptor.inference_mode
+                not contract.gradient_enabled or contract.inference_mode
             ):
                 raise ValueError(
                     "gradient-required TDHook execution needs gradient_enabled=True and inference_mode=False"
                 )
-            if execution.gradient_mode is GradientMode.DISABLED and descriptor.gradient_enabled:
+            if execution.gradient_mode is GradientMode.DISABLED and contract.gradient_enabled:
                 raise ValueError("gradient-disabled TDHook execution is incompatible with gradient_enabled=True")
 
 
@@ -136,4 +130,4 @@ def _reject_unsupported_module(module: torch.nn.Module) -> None:
         raise NotImplementedError("remote modules are not supported by the TDHook workflow runner")
 
 
-__all__ = ["TDHookWorkflowResult", "TDHookWorkflowRunner", "WorkflowRunRecord"]
+__all__ = ["TDHookWorkflowResult", "TDHookWorkflowRunner"]

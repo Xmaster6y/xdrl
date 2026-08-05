@@ -17,7 +17,7 @@ from typing import Any
 import torch
 from tensordict import TensorDictBase
 
-from xdrl.interactions import InteractionDescriptor
+from xdrl.interactions import InteractionContract
 from xdrl.types import KeyRole, TensorDictKey
 
 
@@ -157,7 +157,7 @@ class ObservationTrace:
 
     def observe_tensor(
         self,
-        descriptor: InteractionDescriptor,
+        contract: InteractionContract,
         tensor: torch.Tensor,
         *,
         kind: ObservationKind,
@@ -179,23 +179,23 @@ class ObservationTrace:
         value, retained_dimensions = _retain(tensor, batch_dimensions, self.policy)
         record = ObservationRecord(
             order=order,
-            interaction_id=descriptor.identity,
-            phase=descriptor.phase.value,
-            module_path=descriptor.module_path,
-            model_role=descriptor.role.value,
-            model_id=descriptor.model_id,
-            checkpoint_id=descriptor.checkpoint_id,
-            exploration_mode=descriptor.exploration_mode,
+            interaction_id=contract.identity,
+            phase=contract.phase.value,
+            module_path=contract.module_path,
+            model_role=contract.role.value,
+            model_id=contract.model_id,
+            checkpoint_id=contract.checkpoint_id,
+            exploration_mode=contract.exploration_mode,
             kind=kind,
             hook_direction=direction,
             target=target,
             key_path=_key_path(key) if key is not None else None,
-            batch_dimensions=descriptor.batch_dimensions,
-            time_dimension=descriptor.time_dimension,
-            agent_dimension=descriptor.agent_dimension,
-            logical_step=descriptor.logical_step,
-            episode_id=descriptor.episode_id,
-            trajectory_id=descriptor.trajectory_id,
+            batch_dimensions=contract.batch_dimensions,
+            time_dimension=contract.time_dimension,
+            agent_dimension=contract.agent_dimension,
+            logical_step=contract.logical_step,
+            episode_id=contract.episode_id,
+            trajectory_id=contract.trajectory_id,
             shape=tuple(tensor.shape),
             dtype=str(tensor.dtype),
             device=str(tensor.device),
@@ -209,7 +209,7 @@ class ObservationTrace:
 
     def capture_tensordict(
         self,
-        descriptor: InteractionDescriptor,
+        contract: InteractionContract,
         tensordict: TensorDictBase,
         *,
         direction: HookDirection,
@@ -230,13 +230,13 @@ class ObservationTrace:
                 continue
             records.append(
                 self.observe_tensor(
-                    descriptor,
+                    contract,
                     value,
                     kind=_kind_for(role, direction),
                     target="/".join(path),
                     direction=direction,
                     key=key,
-                    batch_dimensions=descriptor.batch_dimensions,
+                    batch_dimensions=contract.batch_dimensions,
                 )
             )
         return tuple(record for record in records if record is not None)

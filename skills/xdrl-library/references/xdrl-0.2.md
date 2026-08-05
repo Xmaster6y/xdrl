@@ -17,9 +17,9 @@ Installation alone is not compatibility evidence. Call `validate_runtime_compati
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
-from xdrl import BatchSemantics, InteractionDescriptor, InteractionPhase, KeyPresence
+from xdrl import BatchSemantics, InteractionContract, InteractionPhase, KeyPresence
 from xdrl import KeyRole, KeySchema, ModelRole, ObservationTrace
-from xdrl import RuntimeInteractionContext, SchemaSnapshot, TensorDictSchema
+from xdrl import RuntimeInteractionContext, TensorDictSchema
 
 inputs = TensorDictSchema(
     (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),),
@@ -31,13 +31,13 @@ outputs = TensorDictSchema(
 )
 policy = TensorDictModule(torch.nn.Linear(4, 2), in_keys=["observation"], out_keys=["action"])
 batch = TensorDict({"observation": torch.randn(8, 4)}, batch_size=[8])
-descriptor = InteractionDescriptor(
+contract = InteractionContract(
     "actor:evaluation:0", ModelRole.ACTOR, InteractionPhase.EVALUATION, "policy",
-    SchemaSnapshot.from_schema(inputs), SchemaSnapshot.from_schema(outputs),
-    batch_dimensions=("env",), module_training=False,
+    inputs, outputs,
+    module_training=False,
 )
 trace = ObservationTrace()
-interaction = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch, observations=trace)
+interaction = RuntimeInteractionContext(contract, policy, batch, observations=trace)
 result = interaction(batch.clone())
 
 assert result["action"].shape == (8, 2)
@@ -53,10 +53,10 @@ Metadata-only retention is the safe default. Output-parity evidence lives at `te
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
-from xdrl import BatchSemantics, InteractionDescriptor, InteractionPhase, Intervention
+from xdrl import BatchSemantics, InteractionContract, InteractionPhase, Intervention
 from xdrl import InterventionController, InterventionTarget, InterventionTiming
 from xdrl import KeyPresence, KeyRole, KeySchema, ModelRole, RuntimeInteractionContext
-from xdrl import SchemaSnapshot, TensorDictSchema, run_paired
+from xdrl import TensorDictSchema, run_paired
 
 inputs = TensorDictSchema(
     (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),),
@@ -68,18 +68,18 @@ outputs = TensorDictSchema(
 )
 policy = TensorDictModule(torch.nn.Linear(2, 1, bias=False), in_keys=["observation"], out_keys=["action"])
 batch = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
-descriptor = InteractionDescriptor(
+contract = InteractionContract(
     "actor:evaluation:paired", ModelRole.ACTOR, InteractionPhase.EVALUATION, "policy",
-    SchemaSnapshot.from_schema(inputs), SchemaSnapshot.from_schema(outputs),
-    batch_dimensions=("env",), checkpoint_id="checkpoint-1",
+    inputs, outputs,
+    checkpoint_id="checkpoint-1",
 )
-baseline = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+baseline = RuntimeInteractionContext(contract, policy, batch)
 edit = Intervention(
     "add-one", InterventionTarget.TENSORDICT, InterventionTiming.OUTPUT,
     transform=lambda value: value + 1, key="action",
 )
 steered = RuntimeInteractionContext(
-    descriptor, policy, inputs, outputs, batch,
+    contract, policy, batch,
     interventions=InterventionController((edit,)),
 )
 pair = run_paired(baseline, steered, batch)
@@ -98,9 +98,9 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from tdhook.latent import ActivationCaching
 from tdhook.workflow import Workflow
-from xdrl import BatchSemantics, InteractionDescriptor, InteractionPhase, KeyPresence
+from xdrl import BatchSemantics, InteractionContract, InteractionPhase, KeyPresence
 from xdrl import KeyRole, KeySchema, ModelRole, RuntimeInteractionContext
-from xdrl import SchemaSnapshot, TDHookWorkflowRunner, TensorDictSchema
+from xdrl import TDHookWorkflowRunner, TensorDictSchema
 
 inputs = TensorDictSchema(
     (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),),
@@ -112,22 +112,24 @@ outputs = TensorDictSchema(
 )
 policy = TensorDictModule(torch.nn.Linear(4, 2), in_keys=["observation"], out_keys=["action"])
 batch = TensorDict({"observation": torch.randn(8, 4)}, batch_size=[8])
-descriptor = InteractionDescriptor(
+contract = InteractionContract(
     "actor:evaluation:workflow", ModelRole.ACTOR, InteractionPhase.EVALUATION, "policy",
-    SchemaSnapshot.from_schema(inputs), SchemaSnapshot.from_schema(outputs),
-    batch_dimensions=("env",), module_training=False,
+    inputs, outputs,
+    module_training=False,
 )
-interaction = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+interaction = RuntimeInteractionContext(contract, policy, batch)
 workflow = Workflow(ActivationCaching("module", cache_key=("activations", "head")))
 runner = TDHookWorkflowRunner(interaction)
 plan = runner.plan(workflow, batch.clone())
-execution = runner.run(workflow, batch.clone(), expected_plan=plan)
+execution = runner.run(
+    workflow, batch.clone(), code_revision="example-revision", expected_plan=plan
+)
 
-assert execution.record.model_calls == plan.model_passes == 1
+assert execution.provenance.model_calls == plan.model_passes == 1
 assert "module" in execution.data["activations", "head"]
 ```
 
-`TDHookWorkflowRunner` delegates planning and method execution to TDHook. XDRL observes successful root calls through public PyTorch hooks, validates each interaction boundary, restores execution state, and checks the observed count against TDHook's plan. `WorkflowRunRecord` is association evidence, not a TDHook execution receipt or scientific result.
+`TDHookWorkflowRunner` delegates planning and method execution to TDHook. XDRL observes successful root calls through public PyTorch hooks, validates each interaction boundary, restores execution state, and checks the observed count against TDHook's plan. `WorkflowProvenance` records public plan-to-call evidence, dependency versions, code revision, and an optional seed; it is not TDHook artifact provenance or a scientific result.
 
 ## Evidence map
 

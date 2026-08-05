@@ -17,7 +17,7 @@ from tensordict import TensorDictBase
 from xdrl.types import KeyPresence, TensorDictKey, TensorDictSchema
 
 if TYPE_CHECKING:
-    from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext
+    from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 
 
 class InterventionTarget(str, Enum):
@@ -38,7 +38,7 @@ class InterventionValidationError(ValueError):
 
 
 TensorTransform = Callable[[torch.Tensor], torch.Tensor]
-InteractionPredicate = Callable[["InteractionDescriptor"], bool]
+InteractionPredicate = Callable[["InteractionContract"], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,15 +53,15 @@ class InterventionScope:
     exploration_mode: str | None = None
     predicate: InteractionPredicate | None = field(default=None, compare=False, repr=False)
 
-    def matches(self, descriptor: "InteractionDescriptor") -> bool:
+    def matches(self, contract: "InteractionContract") -> bool:
         return (
-            (self.phases is None or descriptor.phase in self.phases)
-            and (self.roles is None or descriptor.role in self.roles)
-            and (self.environment is None or descriptor.environment == self.environment)
-            and (self.time_dimension is None or descriptor.time_dimension == self.time_dimension)
-            and (self.agent_dimension is None or descriptor.agent_dimension == self.agent_dimension)
-            and (self.exploration_mode is None or descriptor.exploration_mode == self.exploration_mode)
-            and (self.predicate is None or self.predicate(descriptor))
+            (self.phases is None or contract.phase in self.phases)
+            and (self.roles is None or contract.role in self.roles)
+            and (self.environment is None or contract.environment == self.environment)
+            and (self.time_dimension is None or contract.time_dimension == self.time_dimension)
+            and (self.agent_dimension is None or contract.agent_dimension == self.agent_dimension)
+            and (self.exploration_mode is None or contract.exploration_mode == self.exploration_mode)
+            and (self.predicate is None or self.predicate(contract))
         )
 
 
@@ -91,8 +91,8 @@ class Intervention:
         if self.key is None or self.module_path is not None:
             raise InterventionValidationError("TensorDict interventions require key and forbid module_path")
 
-    def applies_to(self, descriptor: "InteractionDescriptor") -> bool:
-        return self.scope.matches(descriptor)
+    def applies_to(self, contract: "InteractionContract") -> bool:
+        return self.scope.matches(contract)
 
     def edit_tensor(self, value: torch.Tensor, *, label: str) -> torch.Tensor:
         result = self.replacement if self.replacement is not None else self.transform(value)  # type: ignore[misc]
@@ -138,7 +138,7 @@ class InterventionController:
 
     def validate(self, interaction: "RuntimeInteractionContext") -> None:
         for intervention in self.interventions:
-            if not intervention.applies_to(interaction.descriptor):
+            if not intervention.applies_to(interaction.contract):
                 continue
             if intervention.target is not InterventionTarget.TENSORDICT:
                 continue
@@ -156,7 +156,7 @@ class InterventionController:
         for intervention in self.interventions:
             if intervention.target is not InterventionTarget.TENSORDICT or intervention.timing is not timing:
                 continue
-            if not intervention.applies_to(interaction.descriptor):
+            if not intervention.applies_to(interaction.contract):
                 continue
             assert intervention.key is not None
             value = tensordict.get(intervention.key)
@@ -176,8 +176,8 @@ class InterventionController:
                     intervention.identifier,
                     intervention.target,
                     timing,
-                    interaction.descriptor.identity,
-                    interaction.descriptor.checkpoint_id,
+                    interaction.contract.identity,
+                    interaction.contract.checkpoint_id,
                     len(self.records),
                 )
             )
@@ -195,11 +195,11 @@ def run_paired(
     and execution modes in TorchRL.  This helper only enforces the provenance
     identity needed to compare their outputs safely.
     """
-    baseline_descriptor = baseline.descriptor
-    intervention_descriptor = intervention.descriptor
+    baseline_contract = baseline.contract
+    intervention_contract = intervention.contract
     if (
-        baseline_descriptor.identity != intervention_descriptor.identity
-        or baseline_descriptor.checkpoint_id != intervention_descriptor.checkpoint_id
+        baseline_contract.identity != intervention_contract.identity
+        or baseline_contract.checkpoint_id != intervention_contract.checkpoint_id
     ):
         raise InterventionValidationError(
             "paired executions must share interaction identity and checkpoint provenance"
@@ -219,8 +219,8 @@ def run_paired(
         # random draw into the caller's next interaction.
         _set_rng_state(post_baseline_rng_state)
     return PairedInterventionResult(
-        baseline_descriptor.identity,
-        baseline_descriptor.checkpoint_id,
+        baseline_contract.identity,
+        baseline_contract.checkpoint_id,
         baseline_output,
         intervention_output,
     )

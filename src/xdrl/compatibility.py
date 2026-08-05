@@ -99,6 +99,7 @@ class ConformanceCheck(str, Enum):
     LAZY_MATERIALISATION = "lazy_materialisation"
     PLAN_DELEGATION = "plan_delegation"
     MODEL_PASS_ACCOUNTING = "model_pass_accounting"
+    PROVENANCE_ROUND_TRIP = "provenance_round_trip"
 
 
 @dataclass(frozen=True, slots=True)

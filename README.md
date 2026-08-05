@@ -31,7 +31,9 @@ from xdrl import TDHookWorkflowRunner
 workflow = Workflow(
     ActivationCaching("module.0", cache_key=("activations", "encoder"))
 )
-execution = TDHookWorkflowRunner(interaction).run(workflow, batch)
+execution = TDHookWorkflowRunner(interaction).run(
+    workflow, batch, code_revision="your-git-revision"
+)
 encoder_activations = execution.data["activations", "encoder"]
 ```
 

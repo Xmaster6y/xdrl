@@ -43,10 +43,12 @@ Interaction contexts
 
 ``xdrl.interactions`` records an individual invocation of a TensorDict module
 without changing TorchRL's collector or trainer loops. An
-``InteractionDescriptor`` is the durable, serialisable record: it identifies
-the role, phase, module path, declared I/O schemas, batch semantics,
+``InteractionContract`` is the immutable live declaration: it identifies the
+role, phase, module path, native I/O schemas and specs, batch semantics,
 exploration/gradient/autocast configuration, and any supplied logical
-step/episode/trajectory identifiers. It contains neither tensors nor modules.
+step/episode/trajectory identifiers. It does not own a live model or execution
+TensorDict. Its ``to_dict()`` projection is the durable tensor-free record used
+by workflow provenance.
 ``module_training`` optionally requests train or evaluation mode for the live
 call; the exact pre-existing mode of every submodule is restored afterwards.
 
@@ -77,7 +79,7 @@ collector, rollout, replay buffer, optimiser, or trainer schedule.
    * - Direct call
      - Any
      - Caller input/output
-     - Descriptor-controlled
+     - Contract-controlled
      - One before/after or failure pair per call
    * - Synchronous collection
      - Actor
@@ -167,8 +169,11 @@ schema and execution-mode boundary without wrapping the model, changing its
 class, or shifting TDHook target paths.
 
 ``runner.plan(workflow, data)`` returns TDHook's immutable ``WorkflowPlan``.
-``runner.run(...)`` returns the native final TensorDict together with a
-tensor-free ``WorkflowRunRecord``. The runner rejects plan drift, incompatible
+``runner.run(...)`` requires the executing code revision and returns the native
+final TensorDict, exact TDHook plan, and versioned ``WorkflowProvenance``. The
+provenance snapshot contains the canonical interaction contract, public plan
+executions and compatibility decisions, lifecycle evidence, dependency
+versions, and an optional seed. The runner rejects plan drift, incompatible
 gradient requirements, and a disagreement between TDHook's declared model-pass
 count and the model calls XDRL actually observed. Lazy modules must be
 materialised explicitly. Compiled, distributed, and remote modules remain

@@ -1,116 +1,117 @@
-from dataclasses import replace
 import re
 
 import pytest
+import torch
+from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
+from tdhook.latent import ActivationCaching
+from tdhook.workflow import Workflow
 
-from xdrl.interactions import InteractionDescriptor, InteractionPhase, SchemaSnapshot
-from xdrl.provenance import PROVENANCE_SCHEMA_REVISION, ProvenanceManifest, ProvenanceSchemaError
+from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
+from xdrl.provenance import (
+    WORKFLOW_PROVENANCE_SCHEMA_REVISION,
+    ProvenanceSchemaError,
+    WorkflowProvenance,
+)
+from xdrl.tdhook import TDHookWorkflowRunner
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
 
-def _descriptor() -> InteractionDescriptor:
+def _interaction() -> RuntimeInteractionContext:
     inputs = TensorDictSchema(
         (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),), BatchSemantics(("env",))
     )
     outputs = TensorDictSchema((KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),), BatchSemantics(("env",)))
-    return InteractionDescriptor(
-        identity="policy:evaluation:0",
+    contract = InteractionContract(
+        identity="policy:evaluation:provenance",
         role=ModelRole.ACTOR,
         phase=InteractionPhase.EVALUATION,
         module_path="policy",
-        input_schema=SchemaSnapshot.from_schema(inputs),
-        output_schema=SchemaSnapshot.from_schema(outputs),
-        batch_dimensions=("env",),
+        input_schema=inputs,
+        output_schema=outputs,
         exploration_mode="deterministic",
-        gradient_enabled=False,
         model_id="actor-v2",
         checkpoint_id="sha256:abc",
     )
+    policy = TensorDictModule(torch.nn.Linear(2, 1), in_keys=["observation"], out_keys=["action"])
+    batch = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
+    return RuntimeInteractionContext(contract, policy, batch)
 
 
 def _dependencies() -> dict[str, str]:
     return {
         "python": "3.11.0",
-        "torch": "2.11.0",
-        "tensordict": "0.12.2",
-        "torchrl": "0.12.0+g5b2bc08b",
-        "tdhook": "0.1.3",
-        "xdrl": "0.1.0",
+        "torch": "2.13.0",
+        "tensordict": "0.13.0",
+        "torchrl": "0.13.0",
+        "tdhook": "0.2.0",
+        "xdrl": "0.2.0",
     }
 
 
-@pytest.mark.integration
-def test_provenance_round_trip_covers_reproduction_boundary() -> None:
-    manifest = ProvenanceManifest.capture(
-        _descriptor(),
-        selected_keys=(("observation",), ("action",)),
-        target_paths={"encoder": "td_module.module.0"},
-        tdhook_method={"name": "activation_caching", "pattern": "module\\.0"},
-        dependencies=_dependencies(),
+def _run() -> WorkflowProvenance:
+    interaction = _interaction()
+    workflow = Workflow(ActivationCaching("module", cache_key=("activations", "head")))
+    result = TDHookWorkflowRunner(interaction).run(
+        workflow,
+        interaction.representative_input.clone(),
         code_revision="6b9279a",
+        seed=17,
+        dependencies=_dependencies(),
     )
-
-    restored = ProvenanceManifest.from_json(manifest.to_json())
-
-    assert restored == manifest
-    assert restored.interaction["identity"] == "policy:evaluation:0"
-    assert restored.checkpoint_id == "sha256:abc"
-    assert restored.exploration_mode == "deterministic"
-    assert restored.batch_dimensions == ("env",)
+    return result.provenance
 
 
 @pytest.mark.integration
-def test_provenance_rejects_incompatible_schema_revisions() -> None:
-    manifest = ProvenanceManifest.capture(
-        replace(_descriptor(), checkpoint_id=None),
-        selected_keys=(("observation",),),
-        target_paths={},
-        tdhook_method={"name": "noop"},
-        dependencies=_dependencies(),
-        code_revision="6b9279a",
-    ).to_dict()
-    manifest["schema_revision"] = PROVENANCE_SCHEMA_REVISION + 1
+def test_workflow_provenance_round_trip_covers_verified_execution_boundary() -> None:
+    provenance = _run()
 
-    with pytest.raises(ProvenanceSchemaError, match="unsupported provenance schema revision"):
-        ProvenanceManifest.from_dict(manifest)
+    restored = WorkflowProvenance.from_json(provenance.to_json())
+
+    assert restored == provenance
+    assert restored.interaction_id == "policy:evaluation:provenance"
+    assert restored.interaction_contract["checkpoint_id"] == "sha256:abc"
+    assert restored.workflow_plan.model_passes == restored.model_calls == 1
+    assert restored.workflow_plan.executions[0].steps == ("0:ActivationCaching",)
+    assert restored.seed == 17
 
 
 @pytest.mark.integration
-def test_provenance_rejects_non_serialisable_method_configuration() -> None:
-    with pytest.raises(ProvenanceSchemaError, match="non-serialisable"):
-        ProvenanceManifest.capture(
-            _descriptor(),
-            selected_keys=(("observation",),),
-            target_paths={},
-            tdhook_method={"callback": object()},
-            dependencies=_dependencies(),
-            code_revision="6b9279a",
-        )
+def test_workflow_provenance_rejects_unknown_revisions_and_fields() -> None:
+    payload = _run().to_dict()
+    payload["schema_revision"] = WORKFLOW_PROVENANCE_SCHEMA_REVISION + 1
+    with pytest.raises(ProvenanceSchemaError, match="unsupported workflow provenance schema revision"):
+        WorkflowProvenance.from_dict(payload)
+
+    payload = _run().to_dict()
+    payload["invented"] = True
+    with pytest.raises(ProvenanceSchemaError, match="unknown fields"):
+        WorkflowProvenance.from_dict(payload)
+
+
+@pytest.mark.integration
+def test_workflow_provenance_rejects_plan_to_event_disagreement() -> None:
+    payload = _run().to_dict()
+    payload["lifecycle_events"] = payload["lifecycle_events"][:1]
+
+    with pytest.raises(ProvenanceSchemaError, match="plan and lifecycle evidence disagree"):
+        WorkflowProvenance.from_dict(payload)
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("gradient_enabled", "false", "gradient_enabled must be a boolean"),
-        ("selected_keys", ["observation"], "selected_keys[0] must be a non-empty array"),
-        ("target_paths", [], "target_paths must be an object"),
-        ("tdhook_method", [], "tdhook_method must be an object"),
+        ("seed", "17", "seed must be an integer or null"),
+        ("code_revision", "", "code_revision must be a non-empty string"),
         ("dependencies", {**_dependencies(), "torch": ""}, "dependencies.torch must be a non-empty string"),
-        ("dependencies", {**_dependencies(), "torch": "not-a-version"}, "dependencies.torch must be a valid version"),
-        ("model_id", 7, "model_id must be a non-empty string"),
+        ("dependencies", {**_dependencies(), "torch": "bad"}, "dependencies.torch must be a valid version"),
+        ("interaction_contract", [], "interaction_contract must be an object"),
     ],
 )
-def test_provenance_rejects_malformed_field_types(field: str, value: object, message: str) -> None:
-    manifest = ProvenanceManifest.capture(
-        _descriptor(),
-        selected_keys=(("observation",),),
-        target_paths={},
-        tdhook_method={"name": "noop"},
-        dependencies=_dependencies(),
-        code_revision="6b9279a",
-    ).to_dict()
-    manifest[field] = value
+def test_workflow_provenance_rejects_malformed_fields(field: str, value: object, message: str) -> None:
+    payload = _run().to_dict()
+    payload[field] = value
 
     with pytest.raises(ProvenanceSchemaError, match=re.escape(message)):
-        ProvenanceManifest.from_dict(manifest)
+        WorkflowProvenance.from_dict(payload)

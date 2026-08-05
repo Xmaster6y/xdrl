@@ -1,8 +1,9 @@
-"""Typed execution contexts for individual TorchRL model invocations.
+"""Typed contracts and execution contexts for TorchRL model invocations.
 
-The persistent descriptor is deliberately tensor-free and serialisable.  The
-runtime context owns the live module, representative batch, and temporary
-execution state needed to invoke that module safely.
+An :class:`InteractionContract` is the single immutable declaration of the
+live TensorDict schemas and RL execution semantics. Its serialised projection
+is tensor-free; the runtime context owns only the module, representative batch,
+and temporary execution state needed to invoke that module safely.
 """
 
 from __future__ import annotations
@@ -149,7 +150,7 @@ class MultiAgentSemantics:
 
 
 @dataclass(frozen=True, slots=True)
-class KeySnapshot:
+class _KeySnapshot:
     """Serialisable description of one declared TensorDict key."""
 
     path: tuple[str, ...]
@@ -161,17 +162,17 @@ class KeySnapshot:
 
 
 @dataclass(frozen=True, slots=True)
-class SchemaSnapshot:
+class _SchemaSnapshot:
     """Serialisable projection of a :class:`TensorDictSchema`."""
 
-    keys: tuple[KeySnapshot, ...]
+    keys: tuple[_KeySnapshot, ...]
     batch_dimensions: tuple[str, ...]
 
     @classmethod
-    def from_schema(cls, schema: TensorDictSchema) -> SchemaSnapshot:
+    def from_schema(cls, schema: TensorDictSchema) -> _SchemaSnapshot:
         return cls(
             keys=tuple(
-                KeySnapshot(
+                _KeySnapshot(
                     path=_key_path(entry.key),
                     role=entry.role.value,
                     presence=entry.presence.value,
@@ -186,8 +187,8 @@ class SchemaSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
-class InteractionDescriptor:
-    """Persistent, tensor-free identity and semantics of an interaction.
+class InteractionContract:
+    """Canonical immutable schemas and semantics for one model interaction.
 
     ``identity`` must be stable within one recorded run.  Events for a given
     identity are ordered by their monotonically increasing ``order`` field.
@@ -197,17 +198,13 @@ class InteractionDescriptor:
     role: ModelRole
     phase: InteractionPhase
     module_path: str
-    input_schema: SchemaSnapshot
-    output_schema: SchemaSnapshot
-    batch_dimensions: tuple[str, ...] = ()
+    input_schema: TensorDictSchema
+    output_schema: TensorDictSchema
     environment: str | None = None
     time_dimension: str | None = None
     agent_dimension: str | None = None
     objective: str | None = None
-    recurrent_state_keys: tuple[tuple[str, ...], ...] = ()
-    mask_keys: tuple[tuple[str, ...], ...] = ()
     exploration_mode: str | None = None
-    stochastic_outputs: tuple[tuple[str, ...], ...] = ()
     gradient_enabled: bool = False
     inference_mode: bool = False
     autocast_device_type: str | None = None
@@ -215,7 +212,6 @@ class InteractionDescriptor:
     logical_step: int | None = None
     episode_id: str | int | None = None
     trajectory_id: str | int | None = None
-    module_aliases: Mapping[str, str] = field(default_factory=dict)
     model_id: str | None = None
     checkpoint_id: str | None = None
     module_training: bool | None = None
@@ -231,14 +227,46 @@ class InteractionDescriptor:
             raise ValueError("inference_mode and gradient_enabled cannot both be enabled")
         if self.autocast_enabled and self.autocast_device_type is None:
             raise ValueError("autocast_enabled requires autocast_device_type")
+        if self.input_schema.batch != self.output_schema.batch:
+            raise ValueError("input and output schemas must declare identical batch semantics")
         if self.recurrent is not None:
-            _validate_recurrent_descriptor(self)
+            _validate_recurrent_contract(self)
         if self.multi_agent is not None:
-            _validate_multi_agent_descriptor(self)
+            _validate_multi_agent_contract(self)
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-compatible representation with no tensors or modules."""
-        return asdict(self)
+        """Return a JSON-compatible tensor-free projection of this contract."""
+        return {
+            "identity": self.identity,
+            "role": self.role.value,
+            "phase": self.phase.value,
+            "module_path": self.module_path,
+            "input_schema": asdict(_SchemaSnapshot.from_schema(self.input_schema)),
+            "output_schema": asdict(_SchemaSnapshot.from_schema(self.output_schema)),
+            "batch_dimensions": self.batch_dimensions,
+            "environment": self.environment,
+            "time_dimension": self.time_dimension,
+            "agent_dimension": self.agent_dimension,
+            "objective": self.objective,
+            "exploration_mode": self.exploration_mode,
+            "gradient_enabled": self.gradient_enabled,
+            "inference_mode": self.inference_mode,
+            "autocast_device_type": self.autocast_device_type,
+            "autocast_enabled": self.autocast_enabled,
+            "logical_step": self.logical_step,
+            "episode_id": self.episode_id,
+            "trajectory_id": self.trajectory_id,
+            "model_id": self.model_id,
+            "checkpoint_id": self.checkpoint_id,
+            "module_training": self.module_training,
+            "recurrent": asdict(self.recurrent) if self.recurrent is not None else None,
+            "multi_agent": asdict(self.multi_agent) if self.multi_agent is not None else None,
+        }
+
+    @property
+    def batch_dimensions(self) -> tuple[str, ...]:
+        """Return the single batch declaration shared by both schemas."""
+        return self.input_schema.batch.dimensions
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,13 +299,11 @@ class RuntimeInteractionContext:
     Construction validates the supplied representative input.  ``invoke``
     validates the live input/output around the actual module call and records
     lifecycle metadata.  The module itself, tensors, and hook state never
-    enter :class:`InteractionDescriptor` or :class:`LifecycleEvent`.
+    enter :class:`InteractionContract` or :class:`LifecycleEvent`.
     """
 
-    descriptor: InteractionDescriptor
+    contract: InteractionContract
     module: TensorDictModuleBase
-    input_schema: TensorDictSchema
-    output_schema: TensorDictSchema
     representative_input: TensorDictBase
     hook_context_factory: HookContextFactory | None = None
     observations: ObservationTrace | None = None
@@ -287,32 +313,38 @@ class RuntimeInteractionContext:
     _observing_module_calls: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if SchemaSnapshot.from_schema(self.input_schema) != self.descriptor.input_schema:
-            raise ValueError("input_schema does not match the interaction descriptor snapshot")
-        if SchemaSnapshot.from_schema(self.output_schema) != self.descriptor.output_schema:
-            raise ValueError("output_schema does not match the interaction descriptor snapshot")
         self.input_schema.validate_inputs(self.representative_input)
         self._validate_recurrent_input(self.representative_input)
         if self.interventions is not None:
             self.interventions.validate(self)
+
+    @property
+    def input_schema(self) -> TensorDictSchema:
+        """Return the contract's canonical input schema."""
+        return self.contract.input_schema
+
+    @property
+    def output_schema(self) -> TensorDictSchema:
+        """Return the contract's canonical output schema."""
+        return self.contract.output_schema
 
     def __enter__(self) -> RuntimeInteractionContext:
         if self._stack is not None:
             raise RuntimeError("interaction context is already active")
         stack = ExitStack()
         try:
-            if self.descriptor.module_training is not None:
-                _set_training_mode(stack, self.module, self.descriptor.module_training)
-            if self.descriptor.exploration_mode is not None:
-                stack.enter_context(set_exploration_type(self.descriptor.exploration_mode))
-            stack.enter_context(torch.inference_mode(self.descriptor.inference_mode))
-            if not self.descriptor.inference_mode:
-                stack.enter_context(torch.set_grad_enabled(self.descriptor.gradient_enabled))
-            if self.descriptor.autocast_device_type is not None:
+            if self.contract.module_training is not None:
+                _set_training_mode(stack, self.module, self.contract.module_training)
+            if self.contract.exploration_mode is not None:
+                stack.enter_context(set_exploration_type(self.contract.exploration_mode))
+            stack.enter_context(torch.inference_mode(self.contract.inference_mode))
+            if not self.contract.inference_mode:
+                stack.enter_context(torch.set_grad_enabled(self.contract.gradient_enabled))
+            if self.contract.autocast_device_type is not None:
                 stack.enter_context(
                     torch.autocast(
-                        device_type=self.descriptor.autocast_device_type,
-                        enabled=self.descriptor.autocast_enabled,
+                        device_type=self.contract.autocast_device_type,
+                        enabled=self.contract.autocast_enabled,
                     )
                 )
             if self.hook_context_factory is not None:
@@ -345,8 +377,8 @@ class RuntimeInteractionContext:
         if self._stack is None:
             raise RuntimeError("invoke must be called inside the interaction context")
         invoked_module = self.module if module is None else module
-        if module is not None and module is not self.module and self.descriptor.module_training is not None:
-            _set_training_mode(self._stack, invoked_module, self.descriptor.module_training)
+        if module is not None and module is not self.module and self.contract.module_training is not None:
+            _set_training_mode(self._stack, invoked_module, self.contract.module_training)
         return self.invoke_callable(tensordict, invoked_module)
 
     def invoke_callable(
@@ -365,8 +397,8 @@ class RuntimeInteractionContext:
         """
         if self._stack is None:
             raise RuntimeError("invoke_callable must be called inside the interaction context")
-        if module is not None and module is not self.module and self.descriptor.module_training is not None:
-            _set_training_mode(self._stack, module, self.descriptor.module_training)
+        if module is not None and module is not self.module and self.contract.module_training is not None:
+            _set_training_mode(self._stack, module, self.contract.module_training)
         current = self._before_call(tensordict)
         try:
             result = operation(current)
@@ -454,7 +486,7 @@ class RuntimeInteractionContext:
         return result
 
     def _validate_recurrent_input(self, tensordict: TensorDictBase) -> None:
-        recurrent = self.descriptor.recurrent
+        recurrent = self.contract.recurrent
         if recurrent is None:
             return
         for reset_key in recurrent.reset_keys:
@@ -463,7 +495,7 @@ class RuntimeInteractionContext:
                 raise ValueError(f"recurrent reset key {'/'.join(reset_key)} must contain a boolean tensor")
 
     def _validate_recurrent_output(self, inputs: TensorDictBase, outputs: TensorDictBase) -> None:
-        recurrent = self.descriptor.recurrent
+        recurrent = self.contract.recurrent
         if recurrent is None:
             return
         for transition in recurrent.transitions:
@@ -485,7 +517,7 @@ class RuntimeInteractionContext:
         schema = self.input_schema if input else self.output_schema
         roles = {_key_path(entry.key): entry.role for entry in schema.keys}
         self.observations.capture_tensordict(
-            self.descriptor,
+            self.contract,
             tensordict,
             direction=HookDirection.INPUT if input else HookDirection.OUTPUT,
             roles=roles,
@@ -498,9 +530,9 @@ class RuntimeInteractionContext:
             LifecycleEvent(
                 order=len(self.events),
                 kind=kind,
-                interaction_id=self.descriptor.identity,
-                phase=self.descriptor.phase,
-                module_path=self.descriptor.module_path,
+                interaction_id=self.contract.identity,
+                phase=self.contract.phase,
+                module_path=self.contract.module_path,
                 key_shapes=_key_shapes(tensordict),
                 error=f"{type(error).__name__}: {error}" if error is not None else None,
             )
@@ -511,11 +543,11 @@ def _key_path(key: TensorDictKey) -> tuple[str, ...]:
     return tuple(str(part) for part in key) if isinstance(key, tuple) else (str(key),)
 
 
-def _validate_recurrent_descriptor(descriptor: InteractionDescriptor) -> None:
-    recurrent = descriptor.recurrent
+def _validate_recurrent_contract(contract: InteractionContract) -> None:
+    recurrent = contract.recurrent
     assert recurrent is not None
-    input_entries = {key.path: key for key in descriptor.input_schema.keys}
-    output_entries = {key.path: key for key in descriptor.output_schema.keys}
+    input_entries = {_key_path(entry.key): entry for entry in contract.input_schema.keys}
+    output_entries = {_key_path(entry.key): entry for entry in contract.output_schema.keys}
     for transition in recurrent.transitions:
         input_entry = input_entries.get(transition.input_key)
         if input_entry is None:
@@ -523,32 +555,32 @@ def _validate_recurrent_descriptor(descriptor: InteractionDescriptor) -> None:
         output_entry = output_entries.get(transition.output_key)
         if output_entry is None:
             raise ValueError(f"recurrent output state key {'/'.join(transition.output_key)} is not declared")
-        if input_entry.role != KeyRole.STATE.value or input_entry.presence != KeyPresence.REQUIRED.value:
+        if input_entry.role is not KeyRole.STATE or input_entry.presence is not KeyPresence.REQUIRED:
             raise ValueError(f"recurrent input state key {'/'.join(transition.input_key)} must be required state")
-        if output_entry.role != KeyRole.STATE.value or output_entry.presence != KeyPresence.PRODUCED.value:
+        if output_entry.role is not KeyRole.STATE or output_entry.presence is not KeyPresence.PRODUCED:
             raise ValueError(f"recurrent output state key {'/'.join(transition.output_key)} must be produced state")
     for reset_key in recurrent.reset_keys:
         if reset_key not in input_entries:
             raise ValueError(f"recurrent reset key {'/'.join(reset_key)} is not declared")
-    if recurrent.sequence_dimension != descriptor.time_dimension:
-        raise ValueError("recurrent sequence_dimension must match descriptor time_dimension")
-    if recurrent.sequence_dimension is not None and recurrent.sequence_dimension not in descriptor.batch_dimensions:
+    if recurrent.sequence_dimension != contract.time_dimension:
+        raise ValueError("recurrent sequence_dimension must match contract time_dimension")
+    if recurrent.sequence_dimension is not None and recurrent.sequence_dimension not in contract.batch_dimensions:
         raise ValueError("recurrent sequence_dimension must name a declared batch dimension")
 
 
-def _validate_multi_agent_descriptor(descriptor: InteractionDescriptor) -> None:
-    semantics = descriptor.multi_agent
+def _validate_multi_agent_contract(contract: InteractionContract) -> None:
+    semantics = contract.multi_agent
     assert semantics is not None
-    if descriptor.agent_dimension is None:
+    if contract.agent_dimension is None:
         raise ValueError("multi-agent interactions require an explicit agent_dimension")
-    if semantics.target.role is not descriptor.role:
+    if semantics.target.role is not contract.role:
         raise ValueError("semantic target role must match the interaction model role")
-    if semantics.topology is InteractionTopology.CENTRALISED_CRITIC and descriptor.role not in {
+    if semantics.topology is InteractionTopology.CENTRALISED_CRITIC and contract.role not in {
         ModelRole.CRITIC,
         ModelRole.VALUE,
     }:
         raise ValueError("centralised-critic interactions require a critic or value role")
-    if semantics.topology is InteractionTopology.MIXER and descriptor.role is not ModelRole.MIXER:
+    if semantics.topology is InteractionTopology.MIXER and contract.role is not ModelRole.MIXER:
         raise ValueError("mixer interactions require the mixer model role")
 
 
