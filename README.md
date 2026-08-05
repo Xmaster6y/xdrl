@@ -45,7 +45,7 @@ The supported boundary is currently local, synchronous TensorDict module
 execution. Compiled, remote, distributed, and worker-copied policies are not
 silently treated as supported.
 
-Development tracks the latest TDHook and TorchRL ``main`` branches. The
+Development tracks the latest TensorDict and TorchRL `main` branches. The
 lockfile records the exact revisions exercised by CI; see the
 [compatibility contract](https://xdrl.readthedocs.io/en/latest/compatibility.html#development-dependency-policy).
 

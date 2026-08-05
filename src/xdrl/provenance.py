@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, fields
+from dataclasses import MISSING, asdict, dataclass, fields
 from enum import Enum
 from types import MappingProxyType
 from typing import Any
@@ -14,14 +14,19 @@ from tdhook.workflow import CompatibilityDecision, PlannedExecution, WorkflowPla
 
 from xdrl.compatibility import installed_dependency_versions
 from xdrl.interactions import (
+    AgentSelector,
     InteractionTopology,
     InteractionContract,
     InteractionPhase,
     LifecycleEvent,
     LifecycleEventType,
+    MultiAgentSemantics,
     RecurrentCollectorMode,
+    RecurrentSemantics,
+    RecurrentStateTransition,
+    SemanticTarget,
 )
-from xdrl.types import KeyPresence, KeyRole, ModelRole
+from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
 WORKFLOW_PROVENANCE_SCHEMA_REVISION = 1
 
@@ -132,7 +137,7 @@ class WorkflowProvenance:
         object.__setattr__(self, "interaction_contract", _freeze_json(contract))
         object.__setattr__(self, "dependencies", MappingProxyType(dependencies))
         try:
-            json.dumps(self.to_dict(), sort_keys=True)
+            json.dumps(self.to_dict(), sort_keys=True, allow_nan=False)
         except (TypeError, ValueError) as error:
             raise ProvenanceSchemaError(f"workflow provenance contains a non-serialisable value: {error}") from error
 
@@ -170,7 +175,7 @@ class WorkflowProvenance:
         )
         return cls(
             schema_revision=WORKFLOW_PROVENANCE_SCHEMA_REVISION,
-            interaction_contract=json.loads(json.dumps(contract.to_dict())),
+            interaction_contract=_json_copy(contract.to_dict(), "interaction_contract"),
             workflow_plan=WorkflowPlanEvidence.from_plan(plan),
             lifecycle_events=events,
             dependencies=validated_dependencies,
@@ -199,20 +204,22 @@ class WorkflowProvenance:
             "code_revision": self.code_revision,
             "seed": self.seed,
         }
-        return json.loads(json.dumps(payload))
+        return _json_copy(payload, "workflow provenance")
 
     def to_json(self) -> str:
         """Encode workflow provenance deterministically."""
-        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> WorkflowProvenance:
         """Decode provenance while rejecting unknown revisions or fields."""
         if not isinstance(payload, Mapping):
             raise ProvenanceSchemaError("workflow provenance must contain an object")
-        required = {item.name for item in fields(cls)}
+        model_fields = fields(cls)
+        known = {item.name for item in model_fields}
+        required = {item.name for item in model_fields if item.default is MISSING and item.default_factory is MISSING}
         missing = required - set(payload)
-        unknown = set(payload) - required
+        unknown = set(payload) - known
         if missing or unknown:
             details = []
             if missing:
@@ -230,7 +237,7 @@ class WorkflowProvenance:
         plan = _plan_evidence(payload["workflow_plan"])
         events = _lifecycle_events(payload["lifecycle_events"])
         dependencies = _validate_dependencies(_string_mapping(payload["dependencies"], "dependencies"))
-        seed = payload["seed"]
+        seed = payload.get("seed")
         if seed is not None and type(seed) is not int:
             raise ProvenanceSchemaError("seed must be an integer or null")
         return cls(
@@ -318,7 +325,85 @@ def _contract_projection(value: Any) -> dict[str, Any]:
     output_batch = contract["output_schema"]["batch_dimensions"]
     if input_batch != output_batch or input_batch != contract["batch_dimensions"]:
         raise ProvenanceSchemaError("interaction_contract batch dimensions must agree across both schemas")
+    try:
+        _validate_canonical_contract(contract)
+    except ProvenanceSchemaError:
+        raise
+    except (TypeError, ValueError, NotImplementedError) as error:
+        raise ProvenanceSchemaError(f"interaction_contract violates canonical invariants: {error}") from error
     return contract
+
+
+def _validate_canonical_contract(contract: Mapping[str, Any]) -> None:
+    """Reapply the authoritative typed contract invariants to decoded evidence."""
+
+    def schema(value: Mapping[str, Any]) -> TensorDictSchema:
+        return TensorDictSchema(
+            tuple(
+                KeySchema(tuple(item["path"]), KeyRole(item["role"]), KeyPresence(item["presence"]))
+                for item in value["keys"]
+            ),
+            BatchSemantics(tuple(value["batch_dimensions"])),
+        )
+
+    recurrent_value = contract["recurrent"]
+    recurrent = None
+    if recurrent_value is not None:
+        recurrent = RecurrentSemantics(
+            transitions=tuple(
+                RecurrentStateTransition(tuple(item["input_key"]), tuple(item["output_key"]))
+                for item in recurrent_value["transitions"]
+            ),
+            reset_keys=tuple(tuple(item) for item in recurrent_value["reset_keys"]),
+            sequence_dimension=recurrent_value["sequence_dimension"],
+            burn_in=recurrent_value["burn_in"],
+            truncated_window=recurrent_value["truncated_window"],
+            collector_mode=RecurrentCollectorMode(recurrent_value["collector_mode"]),
+        )
+
+    multi_agent_value = contract["multi_agent"]
+    multi_agent = None
+    if multi_agent_value is not None:
+        target = multi_agent_value["target"]
+        selector = target["selector"]
+        multi_agent = MultiAgentSemantics(
+            topology=InteractionTopology(multi_agent_value["topology"]),
+            group=multi_agent_value["group"],
+            n_agents=multi_agent_value["n_agents"],
+            target=SemanticTarget(
+                ModelRole(target["role"]),
+                AgentSelector(selector["group"], tuple(selector["agents"])),
+            ),
+        )
+
+    try:
+        InteractionContract(
+            identity=contract["identity"],
+            role=ModelRole(contract["role"]),
+            phase=InteractionPhase(contract["phase"]),
+            module_path=contract["module_path"],
+            input_schema=schema(contract["input_schema"]),
+            output_schema=schema(contract["output_schema"]),
+            environment=contract["environment"],
+            time_dimension=contract["time_dimension"],
+            agent_dimension=contract["agent_dimension"],
+            objective=contract["objective"],
+            exploration_mode=contract["exploration_mode"],
+            gradient_enabled=contract["gradient_enabled"],
+            inference_mode=contract["inference_mode"],
+            autocast_device_type=contract["autocast_device_type"],
+            autocast_enabled=contract["autocast_enabled"],
+            logical_step=contract["logical_step"],
+            episode_id=contract["episode_id"],
+            trajectory_id=contract["trajectory_id"],
+            model_id=contract["model_id"],
+            checkpoint_id=contract["checkpoint_id"],
+            module_training=contract["module_training"],
+            recurrent=recurrent,
+            multi_agent=multi_agent,
+        )
+    except (TypeError, ValueError, NotImplementedError) as error:
+        raise ProvenanceSchemaError(f"interaction_contract violates canonical invariants: {error}") from error
 
 
 def _schema_projection(value: Any, field: str) -> dict[str, Any]:
@@ -645,13 +730,20 @@ def _key_path(key: Any) -> tuple[str, ...]:
 def _json_object(value: Any, field: str) -> dict[str, Any]:
     _mapping(value, field)
     try:
-        encoded = json.dumps(value)
+        encoded = json.dumps(value, allow_nan=False)
     except (TypeError, ValueError) as error:
         raise ProvenanceSchemaError(f"{field} must contain only JSON-compatible values") from error
     decoded = json.loads(encoded)
     if not isinstance(decoded, dict):
         raise ProvenanceSchemaError(f"{field} must be an object")
     return decoded
+
+
+def _json_copy(value: Any, field: str) -> Any:
+    try:
+        return json.loads(json.dumps(value, allow_nan=False))
+    except (TypeError, ValueError) as error:
+        raise ProvenanceSchemaError(f"{field} must contain only strict JSON-compatible values") from error
 
 
 def _freeze_json(value: Any) -> Any:

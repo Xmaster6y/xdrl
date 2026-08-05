@@ -74,7 +74,7 @@ SUPPORTED_DEPENDENCIES = (
     ),
     VersionRequirement(
         "torch",
-        "==2.14.*",
+        "==2.14.0.dev20260805",
         marker="(python_full_version >= '3.13' and sys_platform == 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')",
     ),
     VersionRequirement("tensordict", "==0.13.0+g54a147b"),
@@ -116,7 +116,23 @@ WORKFLOW_CONFORMANCE = (
     ConformanceSuite(
         boundary="TDHookWorkflowRunner",
         test_path="tests/behavioural_parity/test_tdhook_workflow.py",
-        checks=tuple(ConformanceCheck),
+        checks=(
+            ConformanceCheck.SCHEMA_PRESERVATION,
+            ConformanceCheck.OUTPUT_PARITY,
+            ConformanceCheck.LIFECYCLE_CLEANUP,
+            ConformanceCheck.EXCEPTION_SAFETY,
+            ConformanceCheck.LAZY_MATERIALISATION,
+            ConformanceCheck.PROVENANCE_ROUND_TRIP,
+        ),
+        support=SupportLevel.SUPPORTED,
+    ),
+    ConformanceSuite(
+        boundary="TDHookWorkflowRunner",
+        test_path="tests/integration/test_tdhook_workflow.py",
+        checks=(
+            ConformanceCheck.PLAN_DELEGATION,
+            ConformanceCheck.MODEL_PASS_ACCOUNTING,
+        ),
         support=SupportLevel.SUPPORTED,
     ),
 )
@@ -140,6 +156,13 @@ PRIVATE_UPSTREAM_APIS = (
         ("src/xdrl/tdhook.py",),
         "tests/upstream_compatibility/test_private_apis.py",
         "detect compiled descendants before TDHook installation",
+    ),
+    PrivateAPIUsage(
+        "tdhook",
+        "tdhook.workflow.Workflow._build_plan",
+        ("src/xdrl/tdhook.py",),
+        "tests/upstream_compatibility/test_private_apis.py",
+        "capture the exact plan built inside Workflow.run until TDHook exposes execution evidence publicly",
     ),
 )
 

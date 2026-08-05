@@ -3,7 +3,7 @@ import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from tdhook.latent import ActivationCaching
-from tdhook.workflow import PlannedExecution, Workflow, WorkflowPlan
+from tdhook.workflow import CompatibilityDecision, Workflow, WorkflowPlan
 
 from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 from xdrl.tdhook import TDHookWorkflowRunner
@@ -103,26 +103,17 @@ def test_workflow_preserves_root_module_type_and_state() -> None:
     assert interaction.module.training
 
 
-class _DishonestWorkflow(Workflow):
-    def plan(self, model: torch.nn.Module, data: TensorDict) -> WorkflowPlan:
-        actual = super().plan(model, data)
-        execution = actual.executions[0]
-        declared = PlannedExecution(
-            execution.steps,
-            execution.kind,
-            execution.in_keys,
-            execution.out_keys,
-            execution.model_passes + 1,
-            execution.gradient_mode,
-            execution.coexecuted,
-        )
-        return WorkflowPlan((declared,), actual.compatibility)
+class _ExtraCallWorkflow(Workflow):
+    def run(self, model: torch.nn.Module, data: TensorDict) -> TensorDict:
+        result = super().run(model, data)
+        model(result)
+        return result
 
 
 @pytest.mark.integration
 def test_planned_and_observed_model_passes_must_match() -> None:
     interaction, _ = _interaction()
-    workflow = _DishonestWorkflow(ActivationCaching("module"))
+    workflow = _ExtraCallWorkflow(ActivationCaching("module"))
 
     with pytest.raises(RuntimeError, match="model-pass mismatch"):
         TDHookWorkflowRunner(interaction).run(
@@ -130,3 +121,43 @@ def test_planned_and_observed_model_passes_must_match() -> None:
         )
 
     assert not interaction.module._forward_hooks
+
+
+class _ChangingPlanWorkflow(Workflow):
+    builds = 0
+
+    @staticmethod
+    def _build_plan(nodes: object) -> WorkflowPlan:
+        plan = Workflow._build_plan(nodes)  # type: ignore[arg-type]
+        _ChangingPlanWorkflow.builds += 1
+        if _ChangingPlanWorkflow.builds == 1:
+            return plan
+        changed = CompatibilityDecision((), "dynamic", False, "changed during execution")
+        return WorkflowPlan(plan.executions, (*plan.compatibility, changed))
+
+
+@pytest.mark.integration
+def test_runner_captures_the_exact_plan_built_inside_workflow_run() -> None:
+    interaction, _ = _interaction()
+    workflow = _ChangingPlanWorkflow(ActivationCaching("module"))
+    _ChangingPlanWorkflow.builds = 0
+
+    execution = TDHookWorkflowRunner(interaction).run(
+        workflow, interaction.representative_input.clone(), code_revision="test-revision"
+    )
+
+    assert execution.plan.compatibility[-1].reason == "changed during execution"
+    assert execution.provenance.workflow_plan.compatibility[-1].reason == "changed during execution"
+
+
+@pytest.mark.integration
+def test_runner_rejects_an_operator_that_reuses_the_interaction_module_before_execution() -> None:
+    interaction, layer = _interaction()
+    data = interaction.representative_input.clone()
+    workflow = Workflow(interaction.module)
+
+    with pytest.raises(ValueError, match="operators must not invoke the interaction module"):
+        TDHookWorkflowRunner(interaction).run(workflow, data, code_revision="test-revision")
+
+    assert layer.calls == 0
+    assert not interaction.events

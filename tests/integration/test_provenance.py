@@ -79,6 +79,16 @@ def test_workflow_provenance_round_trip_covers_verified_execution_boundary() -> 
 
 
 @pytest.mark.integration
+def test_workflow_provenance_uses_the_optional_seed_default_when_decoding() -> None:
+    payload = _run().to_dict()
+    del payload["seed"]
+
+    restored = WorkflowProvenance.from_dict(payload)
+
+    assert restored.seed is None
+
+
+@pytest.mark.integration
 def test_workflow_provenance_is_deeply_immutable_and_returns_detached_payloads() -> None:
     provenance = _run()
     contract = provenance.interaction_contract
@@ -182,11 +192,48 @@ def test_workflow_provenance_validates_schema_key_projections() -> None:
     with pytest.raises(ProvenanceSchemaError, match="JSON-compatible"):
         WorkflowProvenance.from_dict(payload)
 
+    payload = _run().to_dict()
+    key = payload["interaction_contract"]["input_schema"]["keys"][0]
+    key["spec_constraints"] = {"low": float("-inf")}
+    with pytest.raises(ProvenanceSchemaError, match="JSON-compatible"):
+        WorkflowProvenance.from_dict(payload)
+
 
 @pytest.mark.integration
 def test_workflow_provenance_decodes_recurrent_and_multi_agent_contract_evidence() -> None:
     payload = _run().to_dict()
     contract = payload["interaction_contract"]
+    contract["agent_dimension"] = "agent"
+    contract["input_schema"]["keys"].extend(
+        [
+            {
+                "path": ["state"],
+                "role": "state",
+                "presence": "required",
+                "feature_shape": None,
+                "spec_type": None,
+                "spec_constraints": None,
+            },
+            {
+                "path": ["is_init"],
+                "role": "state",
+                "presence": "required",
+                "feature_shape": None,
+                "spec_type": None,
+                "spec_constraints": None,
+            },
+        ]
+    )
+    contract["output_schema"]["keys"].append(
+        {
+            "path": ["next", "state"],
+            "role": "state",
+            "presence": "produced",
+            "feature_shape": None,
+            "spec_type": None,
+            "spec_constraints": None,
+        }
+    )
     contract["recurrent"] = {
         "transitions": [{"input_key": ["state"], "output_key": ["next", "state"]}],
         "reset_keys": [["is_init"]],
@@ -206,6 +253,41 @@ def test_workflow_provenance_decodes_recurrent_and_multi_agent_contract_evidence
 
     assert restored.interaction_contract["recurrent"]["collector_mode"] == "direct"
     assert restored.interaction_contract["multi_agent"]["n_agents"] == 2
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda contract: contract.update({"gradient_enabled": True, "inference_mode": True}), "cannot both"),
+        (lambda contract: contract.update({"autocast_enabled": True}), "requires autocast_device_type"),
+        (
+            lambda contract: contract.update(
+                {
+                    "multi_agent": {
+                        "topology": "parameter_shared",
+                        "group": "agents",
+                        "n_agents": 2,
+                        "target": {
+                            "role": "actor",
+                            "selector": {"group": "other", "agents": []},
+                        },
+                    }
+                }
+            ),
+            "semantic target group must match",
+        ),
+    ],
+)
+def test_workflow_provenance_reapplies_canonical_contract_invariants(
+    mutation: Callable[[dict[str, object]], None], message: str
+) -> None:
+    payload = _run().to_dict()
+    payload["interaction_contract"]["agent_dimension"] = "agent"
+    mutation(payload["interaction_contract"])
+
+    with pytest.raises(ProvenanceSchemaError, match=message):
+        WorkflowProvenance.from_dict(payload)
 
 
 @pytest.mark.integration

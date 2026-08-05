@@ -6,7 +6,6 @@ from tdhook.latent import ActivationCaching
 from tdhook.targets import Target
 from tdhook.workflow import Workflow
 
-from xdrl.compatibility import WORKFLOW_CONFORMANCE, ConformanceCheck
 from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 from xdrl.provenance import WorkflowProvenance
 from xdrl.tdhook import TDHookWorkflowRunner
@@ -75,4 +74,3 @@ def test_lazy_materialisation_is_explicit_before_workflow_execution() -> None:
     actual = runner.run(workflow, interaction.representative_input.clone(), code_revision="test-revision")
 
     assert torch.equal(actual.data.get("action"), expected.get("action"))
-    assert set(WORKFLOW_CONFORMANCE[0].checks) == set(ConformanceCheck)

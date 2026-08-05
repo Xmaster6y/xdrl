@@ -61,6 +61,9 @@ build-backend = "setuptools.build_meta"
 default-groups = ["dev", "docs"]
 
 [tool.uv.sources]
+tensordict = { git = "https://github.com/pytorch/tensordict" }
+# TorchRL main currently selects nightly CPU wheels on macOS Python 3.11/3.13;
+# mirror that upstream split until its source policy is unified.
 torch = [
     { index = "pypi", marker = "sys_platform != 'darwin' or python_version == '3.12'" },
     { index = "pytorch-nightly", marker = "sys_platform == 'darwin' and python_version != '3.12'" },

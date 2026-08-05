@@ -105,6 +105,21 @@ def test_workflow_gradient_requirements_must_match_the_rl_interaction() -> None:
         runner.run(workflow, runner.interaction.representative_input.clone(), code_revision="test-revision")
 
 
+def test_gradient_required_workflow_is_rejected_even_when_forward_gradients_are_enabled() -> None:
+    interaction = _interaction()
+    interaction.contract = replace(interaction.contract, gradient_enabled=True)
+    runner = TDHookWorkflowRunner(interaction)
+
+    with pytest.raises(ValueError, match="caller-managed backward pass"):
+        runner.run(
+            Workflow(_RequiredGradientCaching("module")),
+            interaction.representative_input.clone(),
+            code_revision="test-revision",
+        )
+
+    assert not interaction.events
+
+
 class _DisabledGradientCaching(ActivationCaching):
     @property
     def execution_spec(self) -> ExecutionSpec:

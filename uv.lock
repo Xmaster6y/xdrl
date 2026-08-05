@@ -410,7 +410,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyvers" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'" },
-    { name = "torch", version = "2.14.0.dev20260803+cpu", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.0.dev20260805", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5f/e4/6b4a08168cd3c9dd804df68131e1dcd7ea9507ad78d548f63d3979a34e5c/hoptorch-0.1.4.tar.gz", hash = "sha256:958e22455460342f195c63f989543da6fcc66337b2f8fca1980454209d36d450", size = 15745, upload-time = "2026-06-05T10:02:12.697Z" }
 wheels = [
@@ -1545,7 +1545,7 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "tensordict" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'" },
-    { name = "torch", version = "2.14.0.dev20260803+cpu", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.0.dev20260805", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/c8/2ac21e42bb02ffed5c3b951fe1d42874950b9bc6519d9e0db15748b96500/tdhook-0.2.0.tar.gz", hash = "sha256:e01bf8994d0506951f70f0b064b10b90484bae27211fa8a847ed05944b54beae", size = 86621, upload-time = "2026-08-05T09:02:06.168Z" }
 wheels = [
@@ -1564,7 +1564,7 @@ dependencies = [
     { name = "packaging" },
     { name = "pyvers" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'" },
-    { name = "torch", version = "2.14.0.dev20260803+cpu", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.0.dev20260805", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
 ]
 
 [[package]]
@@ -1659,7 +1659,7 @@ wheels = [
 
 [[package]]
 name = "torch"
-version = "2.14.0.dev20260803+cpu"
+version = "2.14.0.dev20260805"
 source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'darwin'",
@@ -1674,6 +1674,11 @@ dependencies = [
     { name = "sympy", marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
     { name = "typing-extensions", marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
 ]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/nightly/cpu/torch-2.14.0.dev20260805-cp311-cp311-macosx_14_0_arm64.whl", upload-time = "2026-08-05T11:20:47Z" },
+    { url = "https://download-r2.pytorch.org/whl/nightly/cpu/torch-2.14.0.dev20260805-cp312-cp312-macosx_14_0_arm64.whl", upload-time = "2026-08-05T11:19:42Z" },
+    { url = "https://download-r2.pytorch.org/whl/nightly/cpu/torch-2.14.0.dev20260805-cp313-cp313-macosx_14_0_arm64.whl", upload-time = "2026-08-05T11:20:18Z" },
+]
 
 [[package]]
 name = "torchrl"
@@ -1687,7 +1692,7 @@ dependencies = [
     { name = "pyvers" },
     { name = "tensordict" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'" },
-    { name = "torch", version = "2.14.0.dev20260803+cpu", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.0.dev20260805", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
 ]
 
 [[package]]
@@ -1779,7 +1784,7 @@ dependencies = [
     { name = "tdhook" },
     { name = "tensordict" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'" },
-    { name = "torch", version = "2.14.0.dev20260803+cpu", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.0.dev20260805", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
     { name = "torchrl" },
 ]
 
@@ -1805,7 +1810,7 @@ docs = [
 requires-dist = [
     { name = "packaging", specifier = ">=21.0" },
     { name = "tdhook", specifier = ">=0.2,<0.3" },
-    { name = "tensordict", specifier = ">=0.13,<0.14" },
+    { name = "tensordict", git = "https://github.com/pytorch/tensordict" },
     { name = "torch", marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'", specifier = ">=2.11", index = "https://pypi.org/simple" },
     { name = "torch", marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'", specifier = ">=2.11", index = "https://download.pytorch.org/whl/nightly/cpu" },
     { name = "torchrl", git = "https://github.com/pytorch/rl?branch=main" },

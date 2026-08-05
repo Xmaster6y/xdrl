@@ -21,10 +21,12 @@ def test_support_levels_have_test_backed_definitions() -> None:
 
 def test_every_advertised_workflow_boundary_names_a_complete_conformance_suite() -> None:
     assert {suite.boundary for suite in WORKFLOW_CONFORMANCE} == {"TDHookWorkflowRunner"}
-    suite = WORKFLOW_CONFORMANCE[0]
-    assert suite.support is SupportLevel.SUPPORTED
-    assert set(suite.checks) == set(ConformanceCheck)
-    assert suite.test_path.endswith("test_tdhook_workflow.py")
+    assert all(suite.support is SupportLevel.SUPPORTED for suite in WORKFLOW_CONFORMANCE)
+    assert {check for suite in WORKFLOW_CONFORMANCE for check in suite.checks} == set(ConformanceCheck)
+    assert {suite.test_path for suite in WORKFLOW_CONFORMANCE} == {
+        "tests/behavioural_parity/test_tdhook_workflow.py",
+        "tests/integration/test_tdhook_workflow.py",
+    }
 
 
 def test_version_failures_name_the_failed_boundary() -> None:

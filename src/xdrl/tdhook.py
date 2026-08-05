@@ -9,12 +9,15 @@ plan-to-call-count evidence around every actual root model call.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Any, Iterator
 
 import torch
 from tensordict import TensorDictBase
+from tensordict.nn import TensorDictModuleBase
 from tdhook.execution import GradientMode
-from tdhook.workflow import Workflow, WorkflowPlan
+from tdhook.workflow import Workflow, WorkflowPlan, WorkflowUpdate
 
 from xdrl.interactions import LifecycleEventType, RuntimeInteractionContext
 from xdrl.provenance import WorkflowProvenance
@@ -70,13 +73,20 @@ class TDHookWorkflowRunner:
             seed=seed,
             dependencies=dependencies,
         )
-        plan = workflow.plan(self.interaction.module, data)
-        if expected_plan is not None and plan != expected_plan:
+        preflight_plan = workflow.plan(self.interaction.module, data)
+        if expected_plan is not None and preflight_plan != expected_plan:
             raise RuntimeError("TDHook workflow plan changed after caller preflight")
-        self._validate_gradient_contract(plan)
+        self._validate_gradient_contract(preflight_plan)
+        self._reject_interaction_module_operators(workflow)
         event_start = len(self.interaction.events)
         with self.interaction, self.interaction.observe_module_calls():
-            result = workflow.run(self.interaction.module, data)
+            with _capture_workflow_plan(workflow) as observed_plans:
+                result = workflow.run(self.interaction.module, data)
+        if len(observed_plans) != 1:
+            raise RuntimeError("TDHook workflow execution did not expose exactly one execution plan")
+        plan = observed_plans[0]
+        if expected_plan is not None and plan != expected_plan:
+            raise RuntimeError("TDHook workflow plan changed during execution")
         events = tuple(self.interaction.events[event_start:])
         model_calls = sum(event.kind is LifecycleEventType.AFTER for event in events)
         if model_calls != plan.model_passes:
@@ -105,14 +115,41 @@ class TDHookWorkflowRunner:
     def _validate_gradient_contract(self, plan: WorkflowPlan) -> None:
         contract = self.interaction.contract
         for execution in plan.executions:
-            if execution.gradient_mode is GradientMode.REQUIRED and (
-                not contract.gradient_enabled or contract.inference_mode
-            ):
+            if execution.gradient_mode is GradientMode.REQUIRED:
                 raise ValueError(
-                    "gradient-required TDHook execution needs gradient_enabled=True and inference_mode=False"
+                    "gradient-required TDHook workflows are unsupported because Workflow.run removes hook bindings "
+                    "before a caller-managed backward pass"
                 )
             if execution.gradient_mode is GradientMode.DISABLED and contract.gradient_enabled:
                 raise ValueError("gradient-disabled TDHook execution is incompatible with gradient_enabled=True")
+
+    def _reject_interaction_module_operators(self, workflow: Workflow) -> None:
+        for wrapped_step in workflow.steps:
+            step = wrapped_step.step if isinstance(wrapped_step, WorkflowUpdate) else wrapped_step
+            if isinstance(step, TensorDictModuleBase) and any(
+                child is self.interaction.module for child in step.modules()
+            ):
+                raise ValueError(
+                    "workflow operators must not invoke the interaction module; use a TDHook method for root calls"
+                )
+
+
+@contextmanager
+def _capture_workflow_plan(workflow: Workflow) -> Iterator[list[WorkflowPlan]]:
+    """Capture the exact plan built by TDHook inside ``Workflow.run``."""
+    observed: list[WorkflowPlan] = []
+    original = workflow._build_plan
+
+    def capture(nodes: Any) -> WorkflowPlan:
+        plan = original(nodes)
+        observed.append(plan)
+        return plan
+
+    workflow._build_plan = capture  # type: ignore[method-assign]
+    try:
+        yield observed
+    finally:
+        del workflow._build_plan
 
 
 def _has_uninitialized_parameters(module: torch.nn.Module) -> bool:

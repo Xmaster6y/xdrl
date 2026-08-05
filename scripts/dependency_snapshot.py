@@ -11,6 +11,7 @@ import tomllib
 from typing import NamedTuple
 
 from packaging.markers import Marker, UndefinedEnvironmentName
+from packaging.version import Version
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -297,6 +298,8 @@ def _resolution_marker(value: object, name: str) -> str | None:
 
 def _specifier(dependency: Dependency) -> str:
     if dependency.name == "torch":
+        if Version(dependency.version).is_prerelease:
+            return f"=={dependency.version}"
         release = dependency.version.split("+", 1)[0].split(".")
         if len(release) < 2:
             raise SnapshotError(f"cannot derive a minor PyTorch boundary from {dependency.version!r}")

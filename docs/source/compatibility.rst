@@ -32,17 +32,17 @@ contract accepts only the following tested versions:
 
 .. dependency-snapshot: start
 
-==========  ======================  ====================================================================================================================================================================================================================================
-Component   Tested requirement      Evidence
-==========  ======================  ====================================================================================================================================================================================================================================
-Python      ``>=3.11,<3.14``        required CI matrix
-PyTorch     ``==2.13.*``            compatibility and parity suites; ``((python_full_version >= '3.12' and sys_platform != 'darwin') or (python_full_version == '3.12.*' and sys_platform == 'darwin')) or (python_full_version < '3.12' and sys_platform != 'darwin')``
-PyTorch     ``==2.14.*``            compatibility and parity suites; ``(python_full_version >= '3.13' and sys_platform == 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')``
-TensorDict  ``==0.13.0+g54a147b``   schema and parity suites
-TorchRL     ``==0.13.0+gae421b98``  compatibility and integration
-TDHook      ``==0.2.0``             workflow conformance suite
-xdrl        ``==0.2.0``             all required suites
-==========  ======================  ====================================================================================================================================================================================================================================
+==========  ========================  ====================================================================================================================================================================================================================================
+Component   Tested requirement        Evidence
+==========  ========================  ====================================================================================================================================================================================================================================
+Python      ``>=3.11,<3.14``          required CI matrix
+PyTorch     ``==2.13.*``              compatibility and parity suites; ``((python_full_version >= '3.12' and sys_platform != 'darwin') or (python_full_version == '3.12.*' and sys_platform == 'darwin')) or (python_full_version < '3.12' and sys_platform != 'darwin')``
+PyTorch     ``==2.14.0.dev20260805``  compatibility and parity suites; ``(python_full_version >= '3.13' and sys_platform == 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')``
+TensorDict  ``==0.13.0+g54a147b``     schema and parity suites
+TorchRL     ``==0.13.0+gae421b98``    compatibility and integration
+TDHook      ``==0.2.0``               workflow conformance suite
+xdrl        ``==0.2.0``               all required suites
+==========  ========================  ====================================================================================================================================================================================================================================
 
 .. dependency-snapshot: end
 
