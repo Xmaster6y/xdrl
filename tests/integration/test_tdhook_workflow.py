@@ -40,8 +40,10 @@ def _interaction(*, stateful: bool = False) -> tuple[RuntimeInteractionContext, 
     layer = CountingLinear()
     with torch.no_grad():
         layer.weight.copy_(torch.tensor([[2.0, -1.0]]))
-    policy = StatefulTensorDictModule(layer) if stateful else TensorDictModule(
-        layer, in_keys=["observation"], out_keys=["action"]
+    policy = (
+        StatefulTensorDictModule(layer)
+        if stateful
+        else TensorDictModule(layer, in_keys=["observation"], out_keys=["action"])
     )
     policy.train()
     batch = TensorDict({"observation": torch.ones(3, 2)}, batch_size=[3])
