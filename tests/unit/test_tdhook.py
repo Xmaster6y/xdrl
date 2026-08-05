@@ -1,10 +1,12 @@
+from dataclasses import replace
+
 import pytest
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from tdhook.execution import ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching
-from tdhook.workflow import Workflow
+from tdhook.workflow import Workflow, WorkflowPlan
 
 from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 from xdrl.provenance import ProvenanceSchemaError
@@ -59,6 +61,8 @@ def test_runner_rejects_contract_mismatches_and_invalid_boundaries() -> None:
     bad = TensorDict({"other": torch.ones(3, 2, 2)}, batch_size=[3, 2])
     with pytest.raises(ValueError, match="missing required key"):
         runner.plan(Workflow(ActivationCaching("module")), bad)
+    with pytest.raises(TypeError, match="workflow data must"):
+        runner.plan(Workflow(ActivationCaching("module")), object())  # type: ignore[arg-type]
 
 
 def test_runner_rejects_invalid_provenance_metadata_before_execution() -> None:
@@ -99,3 +103,44 @@ def test_workflow_gradient_requirements_must_match_the_rl_interaction() -> None:
     workflow = Workflow(_RequiredGradientCaching("module"))
     with pytest.raises(ValueError, match="gradient-required"):
         runner.run(workflow, runner.interaction.representative_input.clone(), code_revision="test-revision")
+
+
+class _DisabledGradientCaching(ActivationCaching):
+    @property
+    def execution_spec(self) -> ExecutionSpec:
+        return ExecutionSpec(gradient_mode=GradientMode.DISABLED)
+
+
+def test_gradient_disabled_workflow_rejects_gradient_enabled_interaction() -> None:
+    interaction = _interaction()
+    interaction.contract = replace(interaction.contract, gradient_enabled=True)
+    runner = TDHookWorkflowRunner(interaction)
+
+    with pytest.raises(ValueError, match="gradient-disabled"):
+        runner.run(
+            Workflow(_DisabledGradientCaching("module")),
+            interaction.representative_input.clone(),
+            code_revision="test-revision",
+        )
+
+
+def test_runner_rejects_plan_drift_before_execution() -> None:
+    runner = TDHookWorkflowRunner(_interaction())
+
+    with pytest.raises(RuntimeError, match="plan changed"):
+        runner.run(
+            Workflow(ActivationCaching("module")),
+            runner.interaction.representative_input.clone(),
+            code_revision="test-revision",
+            expected_plan=WorkflowPlan((), ()),
+        )
+
+    assert not runner.interaction.events
+
+
+def test_runner_rejects_data_parallel_modules() -> None:
+    interaction = _interaction()
+    interaction.module = torch.nn.DataParallel(interaction.module)
+
+    with pytest.raises(NotImplementedError, match="distributed modules"):
+        TDHookWorkflowRunner(interaction)

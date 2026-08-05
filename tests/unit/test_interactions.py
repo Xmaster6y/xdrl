@@ -253,6 +253,23 @@ def test_contract_owns_live_schemas_and_derives_batch_semantics() -> None:
     assert contract.model_id is None
 
 
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"identity": ""}, "identity must be non-empty"),
+        ({"module_path": ""}, "module_path must be non-empty"),
+        ({"gradient_enabled": True, "inference_mode": True}, "cannot both be enabled"),
+        ({"autocast_enabled": True}, "requires autocast_device_type"),
+    ],
+)
+def test_contract_rejects_invalid_identity_and_execution_modes(changes: dict[str, object], message: str) -> None:
+    inputs, outputs = _schemas()
+    contract = _contract(InteractionPhase.EVALUATION, inputs, outputs)
+
+    with pytest.raises(ValueError, match=message):
+        replace(contract, **changes)
+
+
 class _FailingPolicy:
     def __call__(self, tensordict: TensorDict) -> TensorDict:
         raise RuntimeError("policy failure")

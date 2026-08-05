@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
+from enum import Enum
+from types import MappingProxyType
 from typing import Any
 
 from packaging.version import InvalidVersion, Version
@@ -12,11 +14,14 @@ from tdhook.workflow import CompatibilityDecision, PlannedExecution, WorkflowPla
 
 from xdrl.compatibility import installed_dependency_versions
 from xdrl.interactions import (
+    InteractionTopology,
     InteractionContract,
     InteractionPhase,
     LifecycleEvent,
     LifecycleEventType,
+    RecurrentCollectorMode,
 )
+from xdrl.types import KeyPresence, KeyRole, ModelRole
 
 WORKFLOW_PROVENANCE_SCHEMA_REVISION = 1
 
@@ -110,13 +115,12 @@ class WorkflowProvenance:
                 f"unsupported workflow provenance schema revision {self.schema_revision}; "
                 f"expected {WORKFLOW_PROVENANCE_SCHEMA_REVISION}"
             )
-        if not isinstance(self.interaction_contract, Mapping):
-            raise ProvenanceSchemaError("interaction_contract must be an object")
-        interaction_id = _nonempty_string(self.interaction_contract.get("identity"), "interaction_contract.identity")
+        contract = _contract_projection(_thaw_json(self.interaction_contract))
+        interaction_id = contract["identity"]
         _nonempty_string(self.code_revision, "code_revision")
         if self.seed is not None and type(self.seed) is not int:
             raise ProvenanceSchemaError("seed must be an integer or null")
-        _validate_dependencies(self.dependencies)
+        dependencies = _validate_dependencies(self.dependencies)
         if any(event.interaction_id != interaction_id for event in self.lifecycle_events):
             raise ProvenanceSchemaError("lifecycle events must belong to the interaction contract")
         if self.model_calls != self.workflow_plan.model_passes:
@@ -124,6 +128,9 @@ class WorkflowProvenance:
                 "workflow plan and lifecycle evidence disagree: "
                 f"plan declares {self.workflow_plan.model_passes}, events contain {self.model_calls} successful calls"
             )
+        _validate_lifecycle(self.lifecycle_events, contract, self.workflow_plan.model_passes)
+        object.__setattr__(self, "interaction_contract", _freeze_json(contract))
+        object.__setattr__(self, "dependencies", MappingProxyType(dependencies))
         try:
             json.dumps(self.to_dict(), sort_keys=True)
         except (TypeError, ValueError) as error:
@@ -185,7 +192,7 @@ class WorkflowProvenance:
         """Return a detached JSON-compatible payload."""
         payload = {
             "schema_revision": self.schema_revision,
-            "interaction_contract": json.loads(json.dumps(self.interaction_contract)),
+            "interaction_contract": _thaw_json(self.interaction_contract),
             "workflow_plan": asdict(self.workflow_plan),
             "lifecycle_events": [event.to_dict() for event in self.lifecycle_events],
             "dependencies": dict(self.dependencies),
@@ -219,7 +226,7 @@ class WorkflowProvenance:
                 f"unsupported workflow provenance schema revision {revision!r}; "
                 f"expected {WORKFLOW_PROVENANCE_SCHEMA_REVISION}"
             )
-        contract = dict(_mapping(payload["interaction_contract"], "interaction_contract"))
+        contract = _contract_projection(payload["interaction_contract"])
         plan = _plan_evidence(payload["workflow_plan"])
         events = _lifecycle_events(payload["lifecycle_events"])
         dependencies = _validate_dependencies(_string_mapping(payload["dependencies"], "dependencies"))
@@ -246,6 +253,177 @@ class WorkflowProvenance:
         if not isinstance(value, dict):
             raise ProvenanceSchemaError("workflow provenance JSON must contain an object")
         return cls.from_dict(value)
+
+
+_CONTRACT_FIELDS = {
+    "identity",
+    "role",
+    "phase",
+    "module_path",
+    "input_schema",
+    "output_schema",
+    "batch_dimensions",
+    "environment",
+    "time_dimension",
+    "agent_dimension",
+    "objective",
+    "exploration_mode",
+    "gradient_enabled",
+    "inference_mode",
+    "autocast_device_type",
+    "autocast_enabled",
+    "logical_step",
+    "episode_id",
+    "trajectory_id",
+    "model_id",
+    "checkpoint_id",
+    "module_training",
+    "recurrent",
+    "multi_agent",
+}
+
+
+def _contract_projection(value: Any) -> dict[str, Any]:
+    field = "interaction_contract"
+    entry = _exact_mapping(value, field, _CONTRACT_FIELDS)
+    contract = dict(entry)
+    contract["identity"] = _nonempty_string(entry["identity"], f"{field}.identity")
+    contract["role"] = _enum_string(entry["role"], ModelRole, f"{field}.role")
+    contract["phase"] = _enum_string(entry["phase"], InteractionPhase, f"{field}.phase")
+    contract["module_path"] = _nonempty_string(entry["module_path"], f"{field}.module_path")
+    contract["input_schema"] = _schema_projection(entry["input_schema"], f"{field}.input_schema")
+    contract["output_schema"] = _schema_projection(entry["output_schema"], f"{field}.output_schema")
+    contract["batch_dimensions"] = list(_strings(entry["batch_dimensions"], f"{field}.batch_dimensions"))
+    for name in (
+        "environment",
+        "time_dimension",
+        "agent_dimension",
+        "objective",
+        "exploration_mode",
+        "autocast_device_type",
+        "model_id",
+        "checkpoint_id",
+    ):
+        contract[name] = _optional_string(entry[name], f"{field}.{name}")
+    for name in ("gradient_enabled", "inference_mode", "autocast_enabled"):
+        contract[name] = _boolean(entry[name], f"{field}.{name}")
+    contract["module_training"] = _optional_boolean(entry["module_training"], f"{field}.module_training")
+    contract["logical_step"] = _optional_integer(entry["logical_step"], f"{field}.logical_step")
+    for name in ("episode_id", "trajectory_id"):
+        contract[name] = _optional_identifier(entry[name], f"{field}.{name}")
+    contract["recurrent"] = _recurrent_projection(entry["recurrent"], f"{field}.recurrent")
+    contract["multi_agent"] = _multi_agent_projection(entry["multi_agent"], f"{field}.multi_agent")
+
+    input_batch = contract["input_schema"]["batch_dimensions"]
+    output_batch = contract["output_schema"]["batch_dimensions"]
+    if input_batch != output_batch or input_batch != contract["batch_dimensions"]:
+        raise ProvenanceSchemaError("interaction_contract batch dimensions must agree across both schemas")
+    return contract
+
+
+def _schema_projection(value: Any, field: str) -> dict[str, Any]:
+    entry = _exact_mapping(value, field, {"keys", "batch_dimensions"})
+    keys_value = entry["keys"]
+    if not isinstance(keys_value, list):
+        raise ProvenanceSchemaError(f"{field}.keys must be an array")
+    keys = []
+    for index, value in enumerate(keys_value):
+        key_field = f"{field}.keys[{index}]"
+        key = _exact_mapping(
+            value,
+            key_field,
+            {"path", "role", "presence", "feature_shape", "spec_type", "spec_constraints"},
+        )
+        feature_shape = key["feature_shape"]
+        if feature_shape is not None:
+            feature_shape = list(_dimensions(feature_shape, f"{key_field}.feature_shape"))
+        constraints = key["spec_constraints"]
+        if constraints is not None:
+            constraints = _json_object(constraints, f"{key_field}.spec_constraints")
+        keys.append(
+            {
+                "path": list(_key_path_value(key["path"], f"{key_field}.path")),
+                "role": _enum_string(key["role"], KeyRole, f"{key_field}.role"),
+                "presence": _enum_string(key["presence"], KeyPresence, f"{key_field}.presence"),
+                "feature_shape": feature_shape,
+                "spec_type": _optional_string(key["spec_type"], f"{key_field}.spec_type"),
+                "spec_constraints": constraints,
+            }
+        )
+    return {
+        "keys": keys,
+        "batch_dimensions": list(_strings(entry["batch_dimensions"], f"{field}.batch_dimensions")),
+    }
+
+
+def _recurrent_projection(value: Any, field: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    entry = _exact_mapping(
+        value,
+        field,
+        {"transitions", "reset_keys", "sequence_dimension", "burn_in", "truncated_window", "collector_mode"},
+    )
+    transitions_value = entry["transitions"]
+    if not isinstance(transitions_value, list):
+        raise ProvenanceSchemaError(f"{field}.transitions must be an array")
+    transitions = []
+    for index, value in enumerate(transitions_value):
+        transition_field = f"{field}.transitions[{index}]"
+        transition = _exact_mapping(value, transition_field, {"input_key", "output_key"})
+        transitions.append(
+            {
+                "input_key": list(_key_path_value(transition["input_key"], f"{transition_field}.input_key")),
+                "output_key": list(_key_path_value(transition["output_key"], f"{transition_field}.output_key")),
+            }
+        )
+    reset_keys = _key_paths(entry["reset_keys"], f"{field}.reset_keys")
+    return {
+        "transitions": transitions,
+        "reset_keys": [list(path) for path in reset_keys],
+        "sequence_dimension": _optional_string(entry["sequence_dimension"], f"{field}.sequence_dimension"),
+        "burn_in": _integer(entry["burn_in"], f"{field}.burn_in", minimum=0),
+        "truncated_window": _optional_integer(entry["truncated_window"], f"{field}.truncated_window", minimum=1),
+        "collector_mode": _enum_string(entry["collector_mode"], RecurrentCollectorMode, f"{field}.collector_mode"),
+    }
+
+
+def _multi_agent_projection(value: Any, field: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    entry = _exact_mapping(value, field, {"topology", "group", "n_agents", "target"})
+    target = _exact_mapping(entry["target"], f"{field}.target", {"role", "selector"})
+    selector = _exact_mapping(target["selector"], f"{field}.target.selector", {"group", "agents"})
+    agents_value = selector["agents"]
+    if not isinstance(agents_value, list) or any(
+        type(agent) not in (str, int) or (isinstance(agent, str) and not agent) for agent in agents_value
+    ):
+        raise ProvenanceSchemaError(f"{field}.target.selector.agents must be an array of identifiers")
+    return {
+        "topology": _enum_string(entry["topology"], InteractionTopology, f"{field}.topology"),
+        "group": _nonempty_string(entry["group"], f"{field}.group"),
+        "n_agents": _integer(entry["n_agents"], f"{field}.n_agents", minimum=1),
+        "target": {
+            "role": _enum_string(target["role"], ModelRole, f"{field}.target.role"),
+            "selector": {
+                "group": _nonempty_string(selector["group"], f"{field}.target.selector.group"),
+                "agents": list(agents_value),
+            },
+        },
+    }
+
+
+def _validate_lifecycle(events: tuple[LifecycleEvent, ...], contract: Mapping[str, Any], model_passes: int) -> None:
+    if len(events) != model_passes * 2:
+        raise ProvenanceSchemaError("successful lifecycle evidence must contain one before/after pair per model pass")
+    for index, event in enumerate(events):
+        if index and event.order != events[index - 1].order + 1:
+            raise ProvenanceSchemaError("lifecycle event order must be contiguous and increasing")
+        if event.phase.value != contract["phase"] or event.module_path != contract["module_path"]:
+            raise ProvenanceSchemaError("lifecycle events must match the interaction phase and module path")
+        expected_kind = LifecycleEventType.BEFORE if index % 2 == 0 else LifecycleEventType.AFTER
+        if event.kind is not expected_kind or event.error is not None:
+            raise ProvenanceSchemaError("successful lifecycle evidence must contain ordered before/after pairs")
 
 
 def _plan_evidence(value: Any) -> WorkflowPlanEvidence:
@@ -382,10 +560,65 @@ def _nonempty_string(value: Any, field: str) -> str:
     return value
 
 
+def _optional_string(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    return _nonempty_string(value, field)
+
+
+def _boolean(value: Any, field: str) -> bool:
+    if type(value) is not bool:
+        raise ProvenanceSchemaError(f"{field} must be a boolean")
+    return value
+
+
+def _optional_boolean(value: Any, field: str) -> bool | None:
+    if value is None:
+        return None
+    return _boolean(value, field)
+
+
+def _integer(value: Any, field: str, *, minimum: int | None = None) -> int:
+    if type(value) is not int or minimum is not None and value < minimum:
+        qualifier = f" greater than or equal to {minimum}" if minimum is not None else ""
+        raise ProvenanceSchemaError(f"{field} must be an integer{qualifier}")
+    return value
+
+
+def _optional_integer(value: Any, field: str, *, minimum: int | None = None) -> int | None:
+    if value is None:
+        return None
+    return _integer(value, field, minimum=minimum)
+
+
+def _optional_identifier(value: Any, field: str) -> str | int | None:
+    if value is None:
+        return None
+    if type(value) is int:
+        return value
+    return _nonempty_string(value, field)
+
+
+def _enum_string(value: Any, enum: type[Enum], field: str) -> str:
+    if not isinstance(value, str):
+        raise ProvenanceSchemaError(f"{field} must be a known string value")
+    try:
+        enum(value)
+    except ValueError as error:
+        raise ProvenanceSchemaError(f"{field} must be a known string value") from error
+    return value
+
+
 def _strings(value: Any, field: str) -> tuple[str, ...]:
     if not isinstance(value, list):
         raise ProvenanceSchemaError(f"{field} must be an array")
     return tuple(_nonempty_string(item, f"{field}[{index}]") for index, item in enumerate(value))
+
+
+def _dimensions(value: Any, field: str) -> tuple[int, ...]:
+    if not isinstance(value, list) or any(type(size) is not int for size in value):
+        raise ProvenanceSchemaError(f"{field} must be an array of integers")
+    return tuple(value)
 
 
 def _key_paths(value: Any, field: str) -> tuple[tuple[str, ...], ...]:
@@ -399,8 +632,42 @@ def _key_paths(value: Any, field: str) -> tuple[tuple[str, ...], ...]:
     return tuple(paths)
 
 
+def _key_path_value(value: Any, field: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        raise ProvenanceSchemaError(f"{field} must be a non-empty array")
+    return tuple(_nonempty_string(part, f"{field}[{index}]") for index, part in enumerate(value))
+
+
 def _key_path(key: Any) -> tuple[str, ...]:
     return tuple(str(part) for part in key) if isinstance(key, tuple) else (str(key),)
+
+
+def _json_object(value: Any, field: str) -> dict[str, Any]:
+    _mapping(value, field)
+    try:
+        encoded = json.dumps(value)
+    except (TypeError, ValueError) as error:
+        raise ProvenanceSchemaError(f"{field} must contain only JSON-compatible values") from error
+    decoded = json.loads(encoded)
+    if not isinstance(decoded, dict):
+        raise ProvenanceSchemaError(f"{field} must be an object")
+    return decoded
+
+
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
+def _thaw_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
 
 
 __all__ = [

@@ -103,9 +103,11 @@ Workflow provenance
 the interaction contract's tensor-free projection, TDHook plan, XDRL lifecycle
 events, dependency versions, code revision, and optional seed. ``to_json()``
 is deterministic and ``from_json()`` rejects unknown schema revisions,
-malformed fields, incomplete dependencies, and plan-to-call disagreement. It
-does not claim to be TDHook method configuration or artifact provenance, and it
-does not by itself establish support or scientific validity.
+malformed nested contract or plan fields, incomplete dependencies, lifecycle
+sequence errors, and plan-to-call disagreement. Stored mappings are deeply
+immutable, while ``to_dict()`` returns a detached mutable payload. Provenance
+does not claim to be TDHook method configuration or artifact provenance, and
+it does not by itself establish support or scientific validity.
 
 Documentation examples are built in the same required CI workflow as the test
 gates. Examples must name their support level and conformance suite; dependency

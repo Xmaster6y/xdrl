@@ -179,6 +179,11 @@ count and the model calls XDRL actually observed. Lazy modules must be
 materialised explicitly. Compiled, distributed, and remote modules remain
 unsupported.
 
+Captured provenance is deeply immutable: contract projections, dependency
+mappings, and lifecycle key-shape mappings cannot be changed after
+construction. Decoding validates the complete projected contract shape and
+requires one contiguous ``before``/``after`` pair per successful model pass.
+
 Interactive capture or replacement uses TDHook's ``HookSession`` directly
 inside an active XDRL interaction. XDRL does not implement a second hook,
 target, or intervention runtime.

@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Protocol
 
 import torch
@@ -281,9 +282,20 @@ class LifecycleEvent:
     key_shapes: Mapping[str, tuple[int, ...] | None]
     error: str | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "key_shapes", MappingProxyType(dict(self.key_shapes)))
+
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible event representation."""
-        return asdict(self)
+        return {
+            "order": self.order,
+            "kind": self.kind.value,
+            "interaction_id": self.interaction_id,
+            "phase": self.phase.value,
+            "module_path": self.module_path,
+            "key_shapes": dict(self.key_shapes),
+            "error": self.error,
+        }
 
 
 class HookContextFactory(Protocol):
