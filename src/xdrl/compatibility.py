@@ -67,15 +67,15 @@ class GitRevisionRequirement:
 SUPPORTED_PYTHON = VersionRequirement("python", ">=3.11,<3.14")
 # dependency-snapshot: start
 SUPPORTED_DEPENDENCIES = (
-    VersionRequirement("torch", "==2.11.*"),
-    VersionRequirement("tensordict", "==0.12.2"),
-    VersionRequirement("torchrl", "==0.12.0+g5b2bc08b"),
-    VersionRequirement("tdhook", "==0.1.3"),
-    VersionRequirement("xdrl", "==0.1.0"),
+    VersionRequirement("torch", "==2.13.*"),
+    VersionRequirement("tensordict", "==0.13.0+g54a147b"),
+    VersionRequirement("torchrl", "==0.13.0+gae421b98"),
+    VersionRequirement("tdhook", "==0.2.0"),
+    VersionRequirement("xdrl", "==0.2.0"),
 )
 SUPPORTED_GIT_REVISIONS = (
-    GitRevisionRequirement("torchrl", "5b2bc08b034bf228bfa8563629980b939d59b089"),
-    GitRevisionRequirement("tdhook", "dbb5e4ca37d5d6e2057bf22559746aad844c160d"),
+    GitRevisionRequirement("tdhook", "0b42b3b5a7de32b8cce1a8448c86bae0bbec7066"),
+    GitRevisionRequirement("torchrl", "ae421b98d0dba86e5ab0b24917d1e64f376ee6f9"),
 )
 # dependency-snapshot: end
 
@@ -129,34 +129,6 @@ PRIVATE_UPSTREAM_APIS = (
         ("src/xdrl/tdhook.py",),
         "tests/upstream_compatibility/test_private_apis.py",
         "detect compiled descendants before TDHook installation",
-    ),
-    PrivateAPIUsage(
-        "torchrl",
-        "torchrl.trainers.Trainer._log",
-        ("src/xdrl/configs/hooks.py",),
-        "tests/upstream_compatibility/test_private_apis.py",
-        "emit pre-evaluation metrics through the trainer logger",
-    ),
-    PrivateAPIUsage(
-        "torchrl",
-        "torchrl.trainers.algorithms.configs.common._normalize_hydra_key",
-        ("src/xdrl/configs/hooks.py",),
-        "tests/upstream_compatibility/test_private_apis.py",
-        "normalise Hydra-configured TensorDict keys identically to TorchRL",
-    ),
-    PrivateAPIUsage(
-        "torchrl",
-        "torchrl.trainers.trainers._resolve_module",
-        ("src/xdrl/configs/hooks.py", "src/xdrl/trainer_hooks/checkpoints.py"),
-        "tests/upstream_compatibility/test_private_apis.py",
-        "resolve configured trainer module paths using TorchRL semantics",
-    ),
-    PrivateAPIUsage(
-        "torchrl",
-        "torchrl.record.loggers.wandb._step_registry",
-        ("src/xdrl/trainer_hooks/logging.py",),
-        "tests/upstream_compatibility/test_private_apis.py",
-        "detect whether TorchRL's W&B logger has an uncommitted scalar row",
     ),
 )
 

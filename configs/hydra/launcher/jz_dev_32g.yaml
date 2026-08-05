@@ -1,5 +1,0 @@
-defaults:
-  - jz_dev
-
-setup:
-  - "#SBATCH -C v100-32g"

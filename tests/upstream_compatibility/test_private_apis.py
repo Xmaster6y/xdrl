@@ -4,9 +4,6 @@ import tomllib
 import pytest
 import torch
 from tensordict.nn import TensorDictModule
-from torchrl.trainers.algorithms.configs.common import _normalize_hydra_key
-from torchrl.record.loggers.wandb import WandbLogger
-from torchrl.trainers.trainers import Trainer, _resolve_module
 
 from xdrl.compatibility import (
     PRIVATE_UPSTREAM_APIS,
@@ -24,15 +21,6 @@ def test_private_upstream_inventory_is_owned_by_this_suite() -> None:
     assert all(usage.owner_test == owner for usage in PRIVATE_UPSTREAM_APIS)
     assert all(usage.source_paths for usage in PRIVATE_UPSTREAM_APIS)
     assert all(usage.rationale for usage in PRIVATE_UPSTREAM_APIS)
-
-
-@pytest.mark.upstream_compatibility
-def test_torchrl_private_surfaces_remain_available(tmp_path: Path) -> None:
-    assert callable(_normalize_hydra_key)
-    assert callable(_resolve_module)
-    assert callable(Trainer._log)
-    logger = WandbLogger("private-api-compatibility", offline=True, save_dir=str(tmp_path))
-    assert logger._step_registry == {}
 
 
 @pytest.mark.upstream_compatibility

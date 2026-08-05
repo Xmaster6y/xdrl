@@ -32,22 +32,37 @@ contract accepts only the following tested versions:
 
 .. dependency-snapshot: start
 
-==========  ======================  ===============================
-Component   Tested requirement      Evidence
-==========  ======================  ===============================
-Python      ``>=3.11,<3.14``        required CI matrix
-PyTorch     ``==2.11.*``            compatibility and parity suites
-TensorDict  ``==0.12.2``            schema and parity suites
-TorchRL     ``==0.12.0+g5b2bc08b``  compatibility and integration
-TDHook      ``==0.1.3``             adapter conformance suite
-xdrl        ``==0.1.0``             all required suites
-==========  ======================  ===============================
+==========  ========================  ===============================
+Component   Tested requirement        Evidence
+==========  ========================  ===============================
+Python      ``>=3.11,<3.14``          required CI matrix
+PyTorch     ``==2.13.*``              compatibility and parity suites
+TensorDict  ``==0.13.0+g54a147b``     schema and parity suites
+TorchRL     ``==0.13.0+gae421b98``    compatibility and integration
+TDHook      ``==0.2.0``               workflow conformance suite
+xdrl        ``==0.2.0``               all required suites
+==========  ========================  ===============================
 
 .. dependency-snapshot: end
 
 The current TorchRL and TDHook sources are Git revisions recorded in
 ``uv.lock``. A newly installable upstream revision remains experimental until
 the matrix is updated and all required gates pass.
+
+Development dependency policy
+-----------------------------
+
+XDRL currently advances with TDHook and TorchRL development. ``tool.uv.sources``
+therefore follows their ``main`` branches while ``uv.lock`` records the exact
+commits exercised by CI. Updating either source requires refreshing the lock,
+the compatibility declarations below, and every required conformance and
+documentation gate in the same change. Branch tracking is a development policy,
+not a claim that arbitrary upstream commits are supported.
+
+A future public release must replace this source-tracked policy with dependency
+metadata that reproduces the tested runtime from an index installation. That
+transition is deferred until the APIs and dependency versions are ready to
+stabilise.
 
 Adapter conformance
 -------------------
@@ -72,11 +87,10 @@ Test ownership is separated deliberately:
 Private upstream APIs
 ---------------------
 
-``PRIVATE_UPSTREAM_APIS`` is the machine-readable inventory. The owned uses are
-Torch's ``_orig_mod`` compiled-module marker and TorchRL's ``Trainer._log``,
-``_normalize_hydra_key``, and ``_resolve_module`` surfaces, plus TorchRL's W&B
-logger ``_step_registry``. Their lockstep test is
-``tests/upstream_compatibility/test_private_apis.py``; adding another private
+``PRIVATE_UPSTREAM_APIS`` is the machine-readable inventory. The only owned
+use is Torch's ``_orig_mod`` compiled-module marker, which lets the TDHook
+adapter reject compiled descendants before installing hooks. Its lockstep test
+is ``tests/upstream_compatibility/test_private_apis.py``; adding another private
 surface requires adding it to both the inventory and that owner suite.
 
 Provenance manifests

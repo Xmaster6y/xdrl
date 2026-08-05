@@ -39,14 +39,5 @@ test-integration:
 test-behavioural-parity:
 	uv run pytest tests/behavioural_parity -s -v
 
-wandb-sync:
-	uv run --no-sync wandb sync --sync-all
-
-launch cluster script *args:
-    sbatch launch/{{cluster}}/{{script}}.sh {{args}}
-
-run script *args:
-    uv run -m scripts.{{script}} {{args}}
-
 docs:
 	cd docs && uv run --group docs make html SPHINXOPTS="-W --keep-going"

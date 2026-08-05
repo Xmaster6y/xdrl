@@ -23,6 +23,8 @@ from xdrl.interactions import (
     InteractionDescriptor,
     InteractionPhase,
     InteractionTopology,
+    LifecycleEvent,
+    LifecycleEventType,
     MultiAgentSemantics,
     RecurrentCollectorMode,
     RecurrentSemantics,
@@ -53,14 +55,19 @@ from xdrl.observations import (
     TensorRetention,
 )
 from xdrl.provenance import PROVENANCE_SCHEMA_REVISION, ProvenanceManifest, ProvenanceSchemaError
-from xdrl.tdhook import TDHookInteractionAdapter, TDHookPipelineResult
+from xdrl.tdhook import TDHookInteractionAdapter
 from xdrl.types import (
     BatchSemantics,
+    ContractModule,
     KeyPresence,
     KeyRole,
     KeySchema,
     ModelRole,
+    SchemaValidationError,
+    TensorDictKey,
     TensorDictSchema,
+    TorchRLModule,
+    validate_module,
 )
 
 try:
@@ -75,6 +82,7 @@ __all__ = [
     "CompatibilityBoundaryError",
     "ConformanceCheck",
     "ConformanceSuite",
+    "ContractModule",
     "GitRevisionRequirement",
     "InteractionDescriptor",
     "InteractionPhase",
@@ -89,6 +97,8 @@ __all__ = [
     "KeyPresence",
     "KeyRole",
     "KeySchema",
+    "LifecycleEvent",
+    "LifecycleEventType",
     "MultiAgentSemantics",
     "ModelRole",
     "ObservationKind",
@@ -107,6 +117,7 @@ __all__ = [
     "RetentionPolicy",
     "RuntimeInteractionContext",
     "SchemaSnapshot",
+    "SchemaValidationError",
     "SemanticTarget",
     "SUPPORTED_DEPENDENCIES",
     "SUPPORTED_GIT_REVISIONS",
@@ -115,13 +126,15 @@ __all__ = [
     "SupportLevel",
     "PairedInterventionResult",
     "TDHookInteractionAdapter",
-    "TDHookPipelineResult",
     "TDHookInterventionFactory",
     "TensorDictSchema",
+    "TensorDictKey",
     "TensorRetention",
+    "TorchRLModule",
     "VersionRequirement",
     "installed_dependency_revisions",
     "installed_dependency_versions",
     "run_paired",
+    "validate_module",
     "validate_runtime_compatibility",
 ]

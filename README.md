@@ -6,9 +6,9 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![python versions](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue)](https://www.python.org/downloads/)
 ![ci](https://github.com/Xmaster6y/xdrl/actions/workflows/ci.yml/badge.svg)
-![publish](https://github.com/Xmaster6y/xdrl/actions/workflows/publish.yml/badge.svg)
 
-Interpretability for deep RL with `tdhook` for [TorchRL](https://github.com/pytorch/rl).
+Typed model interactions for [TorchRL](https://github.com/pytorch/rl), with
+[TDHook](https://github.com/Xmaster6y/tdhook) observability and intervention.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Xmaster6y/xdrl/refs/heads/main/docs/source/_static/images/xdrl-logo.png" alt="logo" width="200"/>
@@ -16,11 +16,40 @@ Interpretability for deep RL with `tdhook` for [TorchRL](https://github.com/pyto
 
 ## Getting Started
 
-TBD.
+`xdrl` keeps TensorDict data and TorchRL execution native. It adds explicit
+schemas and execution context around a model call, then binds TDHook to that
+interaction with exception-safe cleanup.
+
+```python
+from tdhook.latent.activation_caching import ActivationCaching
+from xdrl import TDHookInteractionAdapter
+
+# `interaction` is a RuntimeInteractionContext declaring the policy role,
+# TensorDict schemas, batch semantics, and evaluation/collection phase.
+adapter = TDHookInteractionAdapter(interaction, aliases={"encoder": "module.0"})
+
+with adapter.activate(ActivationCaching(r"module\.0")) as active:
+    result = active.invoke(batch)
+    encoder_activations = active.contexts[0].cache["module.0"]
+```
+
+See the [complete quickstart](https://xdrl.readthedocs.io/en/latest/start.html),
+[architecture](https://xdrl.readthedocs.io/en/latest/architecture.html), and
+[compatibility contract](https://xdrl.readthedocs.io/en/latest/compatibility.html).
+
+The supported boundary is currently local, synchronous TensorDict module
+execution. Compiled, remote, distributed, and worker-copied policies are not
+silently treated as supported.
+
+Development tracks the latest TDHook and TorchRL ``main`` branches. The
+lockfile records the exact revisions exercised by CI; see the
+[compatibility contract](https://xdrl.readthedocs.io/en/latest/compatibility.html#development-dependency-policy).
 
 ## Development
 
-This project uses [`uv`](https://docs.astral.sh/uv/) to manage python dependencies and run scripts, as well as [`just`](https://github.com/casey/just) to run commands.
+This project uses [`uv`](https://docs.astral.sh/uv/) to manage Python
+dependencies and [`just`](https://github.com/casey/just) to run the
+conformance and documentation gates.
 
 ## Documentation
 

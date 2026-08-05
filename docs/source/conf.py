@@ -107,4 +107,11 @@ nbsphinx_execute = "auto"
 autoapi_dirs = ["../../src"]
 autoapi_root = "api"
 autoapi_keep_files = False
+autoapi_options = [
+    "members",
+    "undoc-members",
+    "show-inheritance",
+    "show-module-summary",
+    "special-members",
+]
 autodoc_typehints = "description"
