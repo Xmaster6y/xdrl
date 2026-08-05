@@ -15,43 +15,13 @@
 ![ci](https://github.com/Xmaster6y/xdrl/actions/workflows/ci.yml/badge.svg)
 [![docs](https://readthedocs.org/projects/xdrl/badge/?version=latest)](https://xdrl.readthedocs.io/en/latest/?badge=latest)
 
-Typed model interactions for [TorchRL](https://github.com/pytorch/rl), with
-[TDHook](https://github.com/Xmaster6y/tdhook) observability and intervention.
+Typed, inspectable [TorchRL](https://github.com/pytorch/rl) model interactions
+with [TDHook](https://github.com/Xmaster6y/tdhook) observability and intervention.
 
 ## Getting Started
 
-`xdrl` keeps TensorDict data and TorchRL execution native. It adds explicit
-schemas and execution context around model calls, then runs TDHook v0.2
-workflows through that interaction with exception-safe cleanup and model-pass
-evidence.
-
-```python
-from tdhook.latent import ActivationCaching
-from tdhook.workflow import Workflow
-from xdrl import TDHookWorkflowRunner
-
-# `interaction` is a RuntimeInteractionContext declaring the policy role,
-# TensorDict schemas, batch semantics, and evaluation/collection phase.
-workflow = Workflow(
-    ActivationCaching("module.0", cache_key=("activations", "encoder"))
-)
-execution = TDHookWorkflowRunner(interaction).run(
-    workflow, batch, code_revision="your-git-revision"
-)
-encoder_activations = execution.data["activations", "encoder"]
-```
-
-See the [complete quickstart](https://xdrl.readthedocs.io/en/latest/start.html),
-[architecture](https://xdrl.readthedocs.io/en/latest/architecture.html), and
-[compatibility contract](https://xdrl.readthedocs.io/en/latest/compatibility.html).
-
-The supported boundary is currently local, synchronous TensorDict module
-execution. Compiled, remote, distributed, and worker-copied policies are not
-silently treated as supported.
-
-Development tracks the latest TensorDict and TorchRL `main` branches. The
-lockfile records the exact revisions exercised by CI; see the
-[compatibility contract](https://xdrl.readthedocs.io/en/latest/compatibility.html#development-dependency-policy).
+Follow the [Quickstart notebook](https://xdrl.readthedocs.io/en/latest/notebooks/quickstart.html)
+to declare a policy interaction and run a TDHook workflow.
 
 ## Development
 
@@ -61,7 +31,11 @@ conformance and documentation gates.
 
 ## Documentation
 
-See the full documentation at <https://xdrl.readthedocs.io>.
+- [Getting Started](https://xdrl.readthedocs.io/en/latest/start.html)
+- [Features](https://xdrl.readthedocs.io/en/latest/features.html)
+- [Tutorials](https://xdrl.readthedocs.io/en/latest/tutorials.html)
+- [API Reference](https://xdrl.readthedocs.io/en/latest/api/index.html)
+- [About](https://xdrl.readthedocs.io/en/latest/about.html)
 
 ## License
 `xdrl` is licensed under the MIT License. See [LICENSE](./LICENSE) for details.

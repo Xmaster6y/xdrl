@@ -1,40 +1,50 @@
 Features
 ========
 
-TorchRL-native contracts
--------------------------
+.. grid:: 1 2 3 3
+   :gutter: 3
 
-Declare actor, critic, value, loss, encoder, mixer, and world-model roles with
-native TensorDict nested keys and TorchRL tensor specs. Batch semantics name
-environment, time, agent, and objective axes without conflating them with
-feature shape.
+   .. grid-item-card::
+      :class-card: surface
 
-Typed execution contexts
-------------------------
+      .. raw:: html
 
-Describe collection, evaluation, replay, loss, target, and optimisation calls.
-Contexts validate live inputs and outputs and restore exploration, gradient,
-inference, autocast, and module train/evaluation state after success or failure.
+         <i class="fa-solid fa-list-check fa-2x"></i>
+         <h5>Contracts</h5>
+         <p>Native keys, specs, roles, phases, and batch dimensions.</p>
 
-TDHook observability and intervention
--------------------------------------
+   .. grid-item-card::
+      :class-card: surface
 
-Bind TDHook factories to declared TensorDict interactions, with validated
-module paths, explicit lazy materialisation, bounded typed observation traces,
-spec-checked interventions, paired controls, and exception-safe cleanup.
+      .. raw:: html
 
-Recurrent and multi-agent semantics
------------------------------------
+         <i class="fa-solid fa-arrows-rotate fa-2x"></i>
+         <h5>Contexts</h5>
+         <p>Validated calls with state restoration.</p>
 
-Represent recurrent state transitions, reset masks, sequence windows, agent
-groups, parameter sharing, centralised critics, and mixers without treating a
-shared PyTorch path as an agent identity. Unsupported collector lifecycles fail
-explicitly.
+   .. grid-item-card::
+      :class-card: surface
 
-Provenance and conformance
---------------------------
+      .. raw:: html
 
-Record model/checkpoint identity, interaction semantics, selected keys and
-paths, method configuration, dependency versions, and code revision. Separate
-unit, integration, upstream-compatibility, and behavioural-parity suites define
-the supported boundary.
+         <i class="fa-solid fa-wave-square fa-2x"></i>
+         <h5>TDHook workflows</h5>
+         <p>Observation, intervention, planned passes, and cleanup.</p>
+
+   .. grid-item-card::
+      :class-card: surface
+
+      .. raw:: html
+
+         <i class="fa-solid fa-people-group fa-2x"></i>
+         <h5>RL semantics</h5>
+         <p>Recurrent state, reset windows, and multi-agent topology.</p>
+
+   .. grid-item-card::
+      :class-card: surface
+
+      .. raw:: html
+
+         <i class="fa-solid fa-receipt fa-2x"></i>
+         <h5>Provenance</h5>
+         <p>Interaction, plan, versions, revision, and model calls.</p>

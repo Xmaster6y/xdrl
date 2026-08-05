@@ -35,12 +35,6 @@ html[data-theme="light"] {
 }
 
 
-.features {
-    height: 60vh;
-    overflow: hidden;
-}
-
-
 .image-container {
     margin-top: 50px;
 }
@@ -69,15 +63,6 @@ img {
     line-height: normal !important;
 }
 
-.features-container {
-    img {
-        max-width: none;
-    }
-
-    display: flex;
-    gap: 20px;
-}
-
 @media only screen and (max-width: 768px) {
 
     /* Adjust this value based on your breakpoint for mobile */
@@ -89,17 +74,9 @@ img {
         /* Adjust this as needed */
     }
 
-    .features-container {
-        margin-bottom: 20px;
-        /* Increase bottom margin */
-    }
-
     .hero {
         margin-bottom: 30px;
         /* Adjust the bottom margin of the main container */
     }
 
-    .features {
-        height: 110vh;
-    }
 }

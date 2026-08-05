@@ -1,56 +1,41 @@
 Tutorials
 =========
 
-TorchRL execution boundaries
------------------------------
+.. grid:: 1 2 2 2
+   :gutter: 3
 
-Build one ``RuntimeInteractionContext`` for each semantic model invocation.
-The contract distinguishes collection, evaluation, loss, and target calls;
-the live TensorDict remains owned by TorchRL. Assuming ``collection`` is a
-context whose contract has phase ``COLLECTION``, direct execution is simply::
+   .. grid-item-card::
+      :link: notebooks/collection.ipynb
+      :class-card: surface
 
-    action_td = collection(step_td)
+      .. raw:: html
 
-The same callable can be passed as the policy of a local synchronous
-collector. XDRL neither changes the returned keys nor controls batching::
+         <i class="fa-solid fa-robot fa-2x"></i>
+         <h5>Local collection</h5>
+         <p>Use an interaction as a SyncDataCollector policy.</p>
 
-    from torchrl.collectors import SyncDataCollector
+   .. grid-item-card::
+      :link: notebooks/intervention.ipynb
+      :class-card: surface
 
-    collector = SyncDataCollector(
-        env,
-        policy=collection,
-        frames_per_batch=256,
-        total_frames=10_000,
-    )
-    for rollout in collector:
-        replay_buffer.extend(rollout)
+      .. raw:: html
 
-Do not use this pattern with a collector that copies the policy into workers.
-Hooks registered in the main process are not claimed to exist in those copies.
+         <i class="fa-solid fa-sliders fa-2x"></i>
+         <h5>Intervention</h5>
+         <p>Replace a declared activation with TDHook.</p>
 
-For deterministic evaluation, use a distinct contract with
-``phase=InteractionPhase.EVALUATION``, ``exploration_mode="deterministic"``,
-and ``module_training=False``. Both exploration state and the exact train/eval
-flags of the module tree are restored after every call, including failures::
+   .. grid-item-card::
+      :link: notebooks/quickstart.ipynb
+      :class-card: surface
 
-    with torch.no_grad():
-        evaluation_rollout = env.rollout(1_000, policy=evaluation)
+      .. raw:: html
 
-A replay-batch loss module uses the same invocation API. If activation hooks
-only need the forward pass, the one-shot form is sufficient::
+         <i class="fa-solid fa-magnifying-glass-chart fa-2x"></i>
+         <h5>Workflow evidence</h5>
+         <p>Capture an activation and inspect model-pass provenance.</p>
 
-    loss_td = replay_loss(replay_buffer.sample())
+.. toctree::
+   :hidden:
 
-When gradient hooks must observe backward, keep the interaction open until
-backward completes. The contract should use ``phase=InteractionPhase.LOSS``
-or ``OPTIMISATION`` and ``gradient_enabled=True``::
-
-    optimiser.zero_grad()
-    with replay_loss:
-        loss_td = replay_loss.invoke(replay_buffer.sample())
-        loss_td["loss_objective"].backward()
-    optimiser.step()
-
-Target/value estimation should use its own ``TARGET`` contract and identity,
-even when it invokes a module with shared parameters. Logging, checkpointing,
-replay sampling, and optimiser scheduling stay outside the interaction.
+   notebooks/collection.ipynb
+   notebooks/intervention.ipynb

@@ -101,7 +101,7 @@ html_css_files = [
 ]
 
 # Nbsphinx
-nbsphinx_execute = "auto"
+nbsphinx_execute = "never"
 
 # Autoapi
 autoapi_dirs = ["../../src"]
