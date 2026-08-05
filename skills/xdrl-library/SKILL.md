@@ -9,7 +9,7 @@ Use XDRL as the typed boundary around an existing TorchRL model call. Keep data 
 
 ## Select the matching API reference
 
-Check `xdrl.__version__` before writing code. For `0.1.x`, read [references/xdrl-0.1.md](references/xdrl-0.1.md) completely and use only the public `xdrl` namespace shown there. For another version, stop and consult that version's released documentation; do not guess across versions.
+Check `xdrl.__version__` before writing code. For `0.2.x`, read [references/xdrl-0.2.md](references/xdrl-0.2.md) completely. For `0.1.x`, use the historical [references/xdrl-0.1.md](references/xdrl-0.1.md). For another version, stop and consult that version's released documentation; do not guess across versions.
 
 Run `xdrl.validate_runtime_compatibility()` before describing a runtime as supported. A successful install or import proves resolution only, not API compatibility, behavioural parity, or conformance.
 
@@ -28,7 +28,7 @@ Do not introduce an XDRL trainer, data container, tensor-spec hierarchy, or dupl
 3. Wrap the existing TensorDict-compatible module in `RuntimeInteractionContext`. Use the one-shot call for local synchronous execution, or keep the context open when hooks must survive through backward.
 4. Attach an `ObservationTrace` for bounded metadata or opt-in tensor retention. Observation alone must preserve output behavior.
 5. Make every intervention explicit about target, timing, scope, and replacement/transform. Use `run_paired` for matched baseline/intervention mechanics; do not turn mechanical differences into causal claims.
-6. Bind raw TDHook factories with `TDHookInteractionAdapter.activate`. Use `run_pipeline` for a TDHook `Pipeline`; never regroup stages or reinterpret TDHook's planned pass count.
+6. Compose TDHook methods in a public `Workflow`, then use `TDHookWorkflowRunner.plan` and `run`. Use TDHook's `Target` and `HookSession` for interactive model-internal interventions. Never regroup executions or reinterpret TDHook's planned pass count.
 7. Retain `ProvenanceManifest` records with the model/checkpoint, descriptor, selected keys, resolved target paths, method configuration, dependency versions, and code revision.
 
 ## Treat advanced semantics explicitly

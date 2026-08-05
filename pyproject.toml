@@ -11,7 +11,7 @@ authors = [
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "packaging>=21.0",
-    "tdhook",
+    "tdhook>=0.2,<0.3",
     "tensordict>=0.13,<0.14",
     "torch>=2.11",
     "torchrl>=0.13,<0.14",
@@ -61,8 +61,6 @@ build-backend = "setuptools.build_meta"
 default-groups = ["dev", "docs"]
 
 [tool.uv.sources]
-tdhook = { git = "https://github.com/Xmaster6y/tdhook", branch = "codex/tensordict-native-v0.2" }
-tensordict = { git = "https://github.com/pytorch/tensordict", branch = "main" }
 torch = [
     { index = "pypi", marker = "sys_platform != 'darwin' or python_version == '3.12'" },
     { index = "pytorch-nightly", marker = "sys_platform == 'darwin' and python_version != '3.12'" },

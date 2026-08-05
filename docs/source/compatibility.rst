@@ -32,16 +32,17 @@ contract accepts only the following tested versions:
 
 .. dependency-snapshot: start
 
-==========  ========================  ===============================
-Component   Tested requirement        Evidence
-==========  ========================  ===============================
-Python      ``>=3.11,<3.14``          required CI matrix
-PyTorch     ``==2.13.*``              compatibility and parity suites
-TensorDict  ``==0.13.0+g54a147b``     schema and parity suites
-TorchRL     ``==0.13.0+gae421b98``    compatibility and integration
-TDHook      ``==0.2.0``               workflow conformance suite
-xdrl        ``==0.2.0``               all required suites
-==========  ========================  ===============================
+==========  ======================  ====================================================================================================================================================================================================================================
+Component   Tested requirement      Evidence
+==========  ======================  ====================================================================================================================================================================================================================================
+Python      ``>=3.11,<3.14``        required CI matrix
+PyTorch     ``==2.13.*``            compatibility and parity suites; ``((python_full_version >= '3.12' and sys_platform != 'darwin') or (python_full_version == '3.12.*' and sys_platform == 'darwin')) or (python_full_version < '3.12' and sys_platform != 'darwin')``
+PyTorch     ``==2.14.*``            compatibility and parity suites; ``(python_full_version >= '3.13' and sys_platform == 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')``
+TensorDict  ``==0.13.0+g54a147b``   schema and parity suites
+TorchRL     ``==0.13.0+gae421b98``  compatibility and integration
+TDHook      ``==0.2.0``             workflow conformance suite
+xdrl        ``==0.2.0``             all required suites
+==========  ======================  ====================================================================================================================================================================================================================================
 
 .. dependency-snapshot: end
 
@@ -64,16 +65,17 @@ metadata that reproduces the tested runtime from an index installation. That
 transition is deferred until the APIs and dependency versions are ready to
 stabilise.
 
-Adapter conformance
--------------------
+Workflow conformance
+--------------------
 
-``TDHookInteractionAdapter`` is supported by
-``tests/behavioural_parity/test_tdhook_adapter.py``. Its conformance contract
+``TDHookWorkflowRunner`` is supported by
+``tests/behavioural_parity/test_tdhook_workflow.py``. Its conformance contract
 covers TensorDict schema preservation, deterministic observation-only output
-parity, lifecycle cleanup, exception safety, explicit lazy materialisation, and
-target-path resolution. ``tests/integration/test_tdhook_pipeline.py`` owns the
-planned-workflow boundary: TDHook-controlled grouping and pass counts, schema
-validation on every model call, artifact provenance, and failure cleanup.
+parity, lifecycle cleanup, exception safety, explicit lazy materialisation,
+plan delegation, and model-pass accounting.
+``tests/integration/test_tdhook_workflow.py`` owns the declared-workflow
+boundary: TDHook-controlled coexecution, schema validation on every actual
+model call, module identity preservation, plan agreement, and cleanup.
 Compiled, distributed, remote, multiprocess, async, and distributed-collector
 paths remain unsupported and are rejected where they reach a known boundary.
 

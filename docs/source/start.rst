@@ -1,9 +1,10 @@
 Getting Started
 ===============
 
-``xdrl`` describes one TorchRL model invocation with native TensorDict keys,
-TorchRL specs, and explicit execution semantics. TDHook can then observe or
-intervene inside that declared interaction.
+``xdrl`` describes one TorchRL model interaction with native TensorDict keys,
+TorchRL specs, and explicit RL execution semantics. TDHook v0.2 owns configured
+methods, targets, hooks, workflows, planning, and TensorDict artifacts; XDRL
+validates every actual root model call made by that workflow.
 
 The following example is exercised by
 ``tests/integration/test_quickstart.py``:
@@ -13,23 +14,22 @@ The following example is exercised by
    import torch
    from tensordict import TensorDict
    from tensordict.nn import TensorDictModule
-   from tdhook.latent.activation_caching import ActivationCaching
+   from tdhook.latent import ActivationCaching
+   from tdhook.session import HookSession
+   from tdhook.targets import Target
+   from tdhook.workflow import Workflow
 
    from xdrl import (
        BatchSemantics,
        InteractionDescriptor,
        InteractionPhase,
-       Intervention,
-       InterventionTarget,
-       InterventionTiming,
        KeyPresence,
        KeyRole,
        KeySchema,
        ModelRole,
        RuntimeInteractionContext,
        SchemaSnapshot,
-       TDHookInteractionAdapter,
-       TDHookInterventionFactory,
+       TDHookWorkflowRunner,
        TensorDictSchema,
    )
 
@@ -46,10 +46,7 @@ The following example is exercised by
        in_keys=["observation"],
        out_keys=["action"],
    )
-   batch = TensorDict(
-       {"observation": torch.randn(8, 4)},
-       batch_size=[8],
-   )
+   batch = TensorDict({"observation": torch.randn(8, 4)}, batch_size=[8])
    descriptor = InteractionDescriptor(
        identity="policy:evaluation:0",
        role=ModelRole.ACTOR,
@@ -60,34 +57,23 @@ The following example is exercised by
        batch_dimensions=("env",),
        module_training=False,
    )
-   interaction = RuntimeInteractionContext(
-       descriptor,
-       policy,
-       inputs,
-       outputs,
-       batch,
-   )
-   adapter = TDHookInteractionAdapter(
-       interaction,
-       aliases={"head": "module"},
-   )
+   interaction = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
 
-   with adapter.activate(ActivationCaching(r"module")) as active:
-       result = active.invoke(batch.clone())
-       activations = active.contexts[0].cache["module"]
-
-   assert result["action"].shape == (8, 2)
-
-   intervention = Intervention(
-       "zero-policy-head",
-       InterventionTarget.ACTIVATION,
-       InterventionTiming.OUTPUT,
-       transform=torch.zeros_like,
-       module_path="module",
+   workflow = Workflow(
+       ActivationCaching("module", cache_key=("activations", "head"))
    )
-   factory = TDHookInterventionFactory(interaction, (intervention,))
-   with adapter.activate(factory) as active:
-       intervened = active.invoke(batch.clone())
+   runner = TDHookWorkflowRunner(interaction)
+   plan = runner.plan(workflow, batch.clone())
+   execution = runner.run(workflow, batch.clone(), expected_plan=plan)
+
+   assert execution.data["action"].shape == (8, 2)
+   assert "module" in execution.data["activations", "head"]
+   assert execution.record.model_calls == plan.model_passes == 1
+
+   target = Target("module", "activation", -1, (0, 1))
+   with interaction, HookSession(policy) as session:
+       session.replace(target, 0)
+       intervened = interaction.invoke(batch.clone())
 
    assert torch.equal(intervened["action"], torch.zeros(8, 2))
    assert not policy.module._forward_hooks
@@ -95,19 +81,17 @@ The following example is exercised by
 What this guarantees
 --------------------
 
-The interaction validates required inputs and produced outputs, records its
-evaluation lifecycle, switches the module to evaluation mode for the call,
-and restores its previous state. The adapter validates TDHook paths and removes
-all temporary hooks on normal or exceptional exit. Observation-only parity is
-part of the declared conformance suite. The second call makes customisation
-explicit: the intervention must preserve the selected activation's shape,
-dtype, and device, and its hook is removed after the context exits.
+TDHook determines the workflow dependencies, compatibility groups, and pass
+count. XDRL keeps the original model identity and target paths, applies the RL
+execution policy, validates every root TensorDict model call, records its
+lifecycle, and rejects disagreement between planned and observed calls. Both
+libraries restore their temporary state after normal or exceptional exits.
 
 What remains external
 ---------------------
 
-TorchRL still owns environments, collectors, replay, losses, optimisation,
-logging, and checkpointing. TDHook still owns activation capture, attribution,
-probing, patching, and steering methods. Read :doc:`architecture` before using
-recurrent or multi-agent contracts, and :doc:`compatibility` before changing
-the pinned dependency revisions.
+TorchRL owns environments, collectors, replay, losses, and optimisation.
+TDHook owns model-internal methods and interactive target operations. The
+experiment owns the meaning of an intervention, scientific controls, scoring,
+and conclusions. Read :doc:`architecture` for recurrent and multi-agent
+contracts and :doc:`compatibility` before changing the locked dependencies.

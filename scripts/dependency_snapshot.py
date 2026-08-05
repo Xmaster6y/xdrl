@@ -29,7 +29,7 @@ EVIDENCE = {
     "torch": "compatibility and parity suites",
     "tensordict": "schema and parity suites",
     "torchrl": "compatibility and integration",
-    "tdhook": "adapter conformance suite",
+    "tdhook": "workflow conformance suite",
     "xdrl": "all required suites",
 }
 

@@ -67,44 +67,54 @@ class GitRevisionRequirement:
 SUPPORTED_PYTHON = VersionRequirement("python", ">=3.11,<3.14")
 # dependency-snapshot: start
 SUPPORTED_DEPENDENCIES = (
-    VersionRequirement("torch", "==2.13.*"),
+    VersionRequirement(
+        "torch",
+        "==2.13.*",
+        marker="((python_full_version >= '3.12' and sys_platform != 'darwin') or (python_full_version == '3.12.*' and sys_platform == 'darwin')) or (python_full_version < '3.12' and sys_platform != 'darwin')",
+    ),
+    VersionRequirement(
+        "torch",
+        "==2.14.*",
+        marker="(python_full_version >= '3.13' and sys_platform == 'darwin') or (python_full_version < '3.12' and sys_platform == 'darwin')",
+    ),
     VersionRequirement("tensordict", "==0.13.0+g54a147b"),
     VersionRequirement("torchrl", "==0.13.0+gae421b98"),
     VersionRequirement("tdhook", "==0.2.0"),
     VersionRequirement("xdrl", "==0.2.0"),
 )
 SUPPORTED_GIT_REVISIONS = (
-    GitRevisionRequirement("tdhook", "0b42b3b5a7de32b8cce1a8448c86bae0bbec7066"),
+    GitRevisionRequirement("tensordict", "54a147b2d3c21ac407661a26e27a9b0c37e7fbd3"),
     GitRevisionRequirement("torchrl", "ae421b98d0dba86e5ab0b24917d1e64f376ee6f9"),
 )
 # dependency-snapshot: end
 
 
 class ConformanceCheck(str, Enum):
-    """Observable adapter properties which require executable evidence."""
+    """Observable workflow-runner properties requiring executable evidence."""
 
     SCHEMA_PRESERVATION = "schema_preservation"
     OUTPUT_PARITY = "output_parity"
     LIFECYCLE_CLEANUP = "lifecycle_cleanup"
     EXCEPTION_SAFETY = "exception_safety"
     LAZY_MATERIALISATION = "lazy_materialisation"
-    TARGET_PATH_RESOLUTION = "target_path_resolution"
+    PLAN_DELEGATION = "plan_delegation"
+    MODEL_PASS_ACCOUNTING = "model_pass_accounting"
 
 
 @dataclass(frozen=True, slots=True)
 class ConformanceSuite:
-    """Named test suite supporting one advertised adapter."""
+    """Named test suite supporting one advertised integration boundary."""
 
-    adapter: str
+    boundary: str
     test_path: str
     checks: tuple[ConformanceCheck, ...]
     support: SupportLevel
 
 
-ADAPTER_CONFORMANCE = (
+WORKFLOW_CONFORMANCE = (
     ConformanceSuite(
-        adapter="TDHookInteractionAdapter",
-        test_path="tests/behavioural_parity/test_tdhook_adapter.py",
+        boundary="TDHookWorkflowRunner",
+        test_path="tests/behavioural_parity/test_tdhook_workflow.py",
         checks=tuple(ConformanceCheck),
         support=SupportLevel.SUPPORTED,
     ),

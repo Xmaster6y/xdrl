@@ -2,12 +2,12 @@ import pytest
 
 import xdrl.compatibility as compatibility
 from xdrl.compatibility import (
-    ADAPTER_CONFORMANCE,
     SUPPORT_DEFINITIONS,
     CompatibilityBoundaryError,
     ConformanceCheck,
     SupportLevel,
     VersionRequirement,
+    WORKFLOW_CONFORMANCE,
     _validate_version,
 )
 
@@ -19,12 +19,12 @@ def test_support_levels_have_test_backed_definitions() -> None:
     assert "rejected explicitly" in SUPPORT_DEFINITIONS[SupportLevel.UNSUPPORTED]
 
 
-def test_every_advertised_adapter_names_a_complete_conformance_suite() -> None:
-    assert {suite.adapter for suite in ADAPTER_CONFORMANCE} == {"TDHookInteractionAdapter"}
-    suite = ADAPTER_CONFORMANCE[0]
+def test_every_advertised_workflow_boundary_names_a_complete_conformance_suite() -> None:
+    assert {suite.boundary for suite in WORKFLOW_CONFORMANCE} == {"TDHookWorkflowRunner"}
+    suite = WORKFLOW_CONFORMANCE[0]
     assert suite.support is SupportLevel.SUPPORTED
     assert set(suite.checks) == set(ConformanceCheck)
-    assert suite.test_path.endswith("test_tdhook_adapter.py")
+    assert suite.test_path.endswith("test_tdhook_workflow.py")
 
 
 def test_version_failures_name_the_failed_boundary() -> None:

@@ -1,7 +1,6 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from xdrl.compatibility import (
-    ADAPTER_CONFORMANCE,
     PRIVATE_UPSTREAM_APIS,
     SUPPORT_DEFINITIONS,
     SUPPORTED_DEPENDENCIES,
@@ -14,6 +13,7 @@ from xdrl.compatibility import (
     PrivateAPIUsage,
     SupportLevel,
     VersionRequirement,
+    WORKFLOW_CONFORMANCE,
     installed_dependency_revisions,
     installed_dependency_versions,
     validate_runtime_compatibility,
@@ -42,7 +42,6 @@ from xdrl.interventions import (
     InterventionTiming,
     InterventionValidationError,
     PairedInterventionResult,
-    TDHookInterventionFactory,
     run_paired,
 )
 from xdrl.observations import (
@@ -55,7 +54,7 @@ from xdrl.observations import (
     TensorRetention,
 )
 from xdrl.provenance import PROVENANCE_SCHEMA_REVISION, ProvenanceManifest, ProvenanceSchemaError
-from xdrl.tdhook import TDHookInteractionAdapter
+from xdrl.tdhook import TDHookWorkflowResult, TDHookWorkflowRunner, WorkflowRunRecord
 from xdrl.types import (
     BatchSemantics,
     ContractModule,
@@ -76,7 +75,6 @@ except PackageNotFoundError:
     __version__ = "unknown version"
 
 __all__ = [
-    "ADAPTER_CONFORMANCE",
     "AgentSelector",
     "BatchSemantics",
     "CompatibilityBoundaryError",
@@ -125,13 +123,15 @@ __all__ = [
     "SUPPORT_DEFINITIONS",
     "SupportLevel",
     "PairedInterventionResult",
-    "TDHookInteractionAdapter",
-    "TDHookInterventionFactory",
+    "TDHookWorkflowResult",
+    "TDHookWorkflowRunner",
     "TensorDictSchema",
     "TensorDictKey",
     "TensorRetention",
     "TorchRLModule",
     "VersionRequirement",
+    "WorkflowRunRecord",
+    "WORKFLOW_CONFORMANCE",
     "installed_dependency_revisions",
     "installed_dependency_versions",
     "run_paired",

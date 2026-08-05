@@ -1,23 +1,22 @@
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
-from tdhook.latent.activation_caching import ActivationCaching
+from tdhook.latent import ActivationCaching
+from tdhook.session import HookSession
+from tdhook.targets import Target
+from tdhook.workflow import Workflow
 
 from xdrl import (
     BatchSemantics,
     InteractionDescriptor,
     InteractionPhase,
-    Intervention,
-    InterventionTarget,
-    InterventionTiming,
     KeyPresence,
     KeyRole,
     KeySchema,
     ModelRole,
     RuntimeInteractionContext,
     SchemaSnapshot,
-    TDHookInteractionAdapter,
-    TDHookInterventionFactory,
+    TDHookWorkflowRunner,
     TensorDictSchema,
 )
 
@@ -44,27 +43,20 @@ def test_documented_quickstart_observes_a_typed_policy_interaction() -> None:
         module_training=False,
     )
     interaction = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
-    adapter = TDHookInteractionAdapter(interaction, aliases={"head": "module"})
-
-    with adapter.activate(ActivationCaching(r"module")) as active:
-        result = active.invoke(batch.clone())
-        cache = active.contexts[0].cache
+    workflow = Workflow(ActivationCaching("module", cache_key=("activations", "head")))
+    execution = TDHookWorkflowRunner(interaction).run(workflow, batch.clone())
+    result = execution.data
+    cache = result["activations", "head"]
 
     assert result["action"].shape == (8, 2)
     assert "module" in cache
-    assert adapter.target_paths == {"head": "td_module.module"}
+    assert execution.record.model_calls == 1
     assert not policy.module._forward_hooks
 
-    intervention = Intervention(
-        "zero-policy-head",
-        InterventionTarget.ACTIVATION,
-        InterventionTiming.OUTPUT,
-        transform=torch.zeros_like,
-        module_path="module",
-    )
-    factory = TDHookInterventionFactory(interaction, (intervention,))
-    with adapter.activate(factory) as active:
-        intervened = active.invoke(batch.clone())
+    target = Target("module", "activation", -1, (0, 1))
+    with interaction, HookSession(policy) as session:
+        session.replace(target, 0)
+        intervened = interaction.invoke(batch.clone())
 
     assert torch.equal(intervened["action"], torch.zeros(8, 2))
     assert not policy.module._forward_hooks

@@ -8,10 +8,10 @@ execution state needed to invoke that module safely.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Protocol
 
 import torch
 from tensordict import TensorDictBase
@@ -223,6 +223,14 @@ class InteractionDescriptor:
     multi_agent: MultiAgentSemantics | None = None
 
     def __post_init__(self) -> None:
+        if not self.identity:
+            raise ValueError("interaction identity must be non-empty")
+        if not self.module_path:
+            raise ValueError("interaction module_path must be non-empty")
+        if self.inference_mode and self.gradient_enabled:
+            raise ValueError("inference_mode and gradient_enabled cannot both be enabled")
+        if self.autocast_enabled and self.autocast_device_type is None:
+            raise ValueError("autocast_enabled requires autocast_device_type")
         if self.recurrent is not None:
             _validate_recurrent_descriptor(self)
         if self.multi_agent is not None:
@@ -276,6 +284,7 @@ class RuntimeInteractionContext:
     interventions: InterventionController | None = None
     events: list[LifecycleEvent] = field(default_factory=list, init=False)
     _stack: ExitStack | None = field(default=None, init=False, repr=False)
+    _observing_module_calls: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if SchemaSnapshot.from_schema(self.input_schema) != self.descriptor.input_schema:
@@ -358,6 +367,67 @@ class RuntimeInteractionContext:
             raise RuntimeError("invoke_callable must be called inside the interaction context")
         if module is not None and module is not self.module and self.descriptor.module_training is not None:
             _set_training_mode(self._stack, module, self.descriptor.module_training)
+        current = self._before_call(tensordict)
+        try:
+            result = operation(current)
+        except BaseException as error:
+            self._record(LifecycleEventType.FAILURE, current, error)
+            raise
+        return self._after_call(current, result)
+
+    @contextmanager
+    def observe_module_calls(self) -> Iterator[None]:
+        """Validate every root-module call made by another execution owner.
+
+        TDHook workflows must receive the original module so their model-relative
+        targets and binding facts remain unchanged. Temporary public root hooks
+        let XDRL observe each actual model pass without wrapping the module or
+        changing its class.
+        """
+        if self._stack is None:
+            raise RuntimeError("observe_module_calls requires an active interaction context")
+        if self._observing_module_calls:
+            raise RuntimeError("module-call observation is already active")
+        pending: list[TensorDictBase] = []
+
+        def before(_module: torch.nn.Module, args: tuple[object, ...]) -> tuple[object, ...]:
+            if _module is not self.module:
+                return args
+            if len(args) != 1 or not isinstance(args[0], TensorDictBase):
+                raise TypeError("observed model calls require one positional TensorDict argument")
+            current = self._before_call(args[0])
+            pending.append(current)
+            return (current,)
+
+        def after(_module: torch.nn.Module, _args: tuple[object, ...], result: object) -> TensorDictBase:
+            if _module is not self.module:
+                if not isinstance(result, TensorDictBase):
+                    raise TypeError(f"TDHook wrapper must return a TensorDict, got {type(result).__name__}")
+                return result
+            if not pending:
+                raise RuntimeError("observed model call completed without a matching input")
+            current = pending.pop()
+            if not isinstance(result, TensorDictBase):
+                error = TypeError(f"observed model call must return a TensorDict, got {type(result).__name__}")
+                self._record(LifecycleEventType.FAILURE, current, error)
+                raise error
+            return self._after_call(current, result)
+
+        self._observing_module_calls = True
+        pre_handle = self.module.register_forward_pre_hook(before, prepend=True)
+        post_handle = self.module.register_forward_hook(after)
+        try:
+            yield
+        except BaseException as error:
+            while pending:
+                self._record(LifecycleEventType.FAILURE, pending.pop(), error)
+            raise
+        finally:
+            post_handle.remove()
+            pre_handle.remove()
+            self._observing_module_calls = False
+
+    def _before_call(self, tensordict: TensorDictBase) -> TensorDictBase:
         self._record(LifecycleEventType.BEFORE, tensordict)
         try:
             self.input_schema.validate_inputs(tensordict)
@@ -365,13 +435,15 @@ class RuntimeInteractionContext:
                 tensordict = self.interventions.apply(self, tensordict, InterventionTiming.INPUT)
             self._validate_recurrent_input(tensordict)
             self._capture_observations(tensordict, input=True)
-            result = operation(tensordict)
         except BaseException as error:
             self._record(LifecycleEventType.FAILURE, tensordict, error)
             raise
+        return tensordict
+
+    def _after_call(self, inputs: TensorDictBase, result: TensorDictBase) -> TensorDictBase:
         try:
             self.output_schema.validate_outputs(result)
-            self._validate_recurrent_output(tensordict, result)
+            self._validate_recurrent_output(inputs, result)
             if self.interventions is not None:
                 result = self.interventions.apply(self, result, InterventionTiming.OUTPUT)
         except BaseException as error:

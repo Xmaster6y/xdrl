@@ -156,23 +156,24 @@ batch-dimension name (such as ``time`` or ``agent``) with a serialised
 callback supports streaming consumers. Probes and attribution remain external
 consumers of these records rather than becoming xdrl algorithms.
 
-TDHook instrumentation
-----------------------
+TDHook v0.2 workflows
+---------------------
 
-``TDHookInteractionAdapter`` binds one ``RuntimeInteractionContext`` to one or
-more raw TDHook context factories. It validates that the selected TensorDict
-input and output keys satisfy both the model and interaction contract, then
-executes through the existing context without changing TensorDict nesting,
-batch shape, dtype, device, or model mode. Semantic aliases in the interaction
-descriptor are exposed as stable TDHook target paths.
+``TDHookWorkflowRunner`` delegates composition, planning, coexecution,
+TensorDict artifacts, target resolution, and hook cleanup to TDHook's public
+``Workflow`` API. XDRL installs temporary public hooks on the original root
+TensorDict module so every actual model pass crosses the live RL input/output
+schema and execution-mode boundary without wrapping the model, changing its
+class, or shifting TDHook target paths.
 
-Lazy modules must be explicitly materialised with ``adapter.materialize()``
-before ``adapter.activate(factory)``. Compiled, distributed, and remote modules
-are rejected instead of being instrumented with ambiguous semantics.
+``runner.plan(workflow, data)`` returns TDHook's immutable ``WorkflowPlan``.
+``runner.run(...)`` returns the native final TensorDict together with a
+tensor-free ``WorkflowRunRecord``. The runner rejects plan drift, incompatible
+gradient requirements, and a disagreement between TDHook's declared model-pass
+count and the model calls XDRL actually observed. Lazy modules must be
+materialised explicitly. Compiled, distributed, and remote modules remain
+unsupported.
 
-Declared TDHook workflows use ``adapter.run_pipeline(pipeline, artifacts,
-code_revision=...)``. TDHook plans the workflow before execution and remains
-the owner of stage grouping, artifacts, pass counts, and hook cleanup. Every
-planned model call crosses the same live XDRL input/output schema and execution
-mode boundary, and the returned ``TDHookPipelineResult`` links TDHook's stage
-artifacts and plan to the interaction's model and checkpoint provenance.
+Interactive capture or replacement uses TDHook's ``HookSession`` directly
+inside an active XDRL interaction. XDRL does not implement a second hook,
+target, or intervention runtime.

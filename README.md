@@ -17,20 +17,22 @@ Typed model interactions for [TorchRL](https://github.com/pytorch/rl), with
 ## Getting Started
 
 `xdrl` keeps TensorDict data and TorchRL execution native. It adds explicit
-schemas and execution context around a model call, then binds TDHook to that
-interaction with exception-safe cleanup.
+schemas and execution context around model calls, then runs TDHook v0.2
+workflows through that interaction with exception-safe cleanup and model-pass
+evidence.
 
 ```python
-from tdhook.latent.activation_caching import ActivationCaching
-from xdrl import TDHookInteractionAdapter
+from tdhook.latent import ActivationCaching
+from tdhook.workflow import Workflow
+from xdrl import TDHookWorkflowRunner
 
 # `interaction` is a RuntimeInteractionContext declaring the policy role,
 # TensorDict schemas, batch semantics, and evaluation/collection phase.
-adapter = TDHookInteractionAdapter(interaction, aliases={"encoder": "module.0"})
-
-with adapter.activate(ActivationCaching(r"module\.0")) as active:
-    result = active.invoke(batch)
-    encoder_activations = active.contexts[0].cache["module.0"]
+workflow = Workflow(
+    ActivationCaching("module.0", cache_key=("activations", "encoder"))
+)
+execution = TDHookWorkflowRunner(interaction).run(workflow, batch)
+encoder_activations = execution.data["activations", "encoder"]
 ```
 
 See the [complete quickstart](https://xdrl.readthedocs.io/en/latest/start.html),
