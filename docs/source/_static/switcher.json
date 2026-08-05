@@ -2,5 +2,9 @@
     {
       "version": "dev",
       "url": "https://xdrl.readthedocs.io/en/latest/"
+    },
+    {
+      "version": "v0.2.0",
+      "url": "https://xdrl.readthedocs.io/en/v0.2.0/"
     }
   ]
