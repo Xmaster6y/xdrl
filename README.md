@@ -20,24 +20,8 @@ with [TDHook](https://github.com/Xmaster6y/tdhook) observability and interventio
 
 ## Getting Started
 
-Use XDRL around one TensorDict model call. It validates the declared inputs and
-outputs while TDHook runs the requested workflow.
-
-```python
-from tdhook.latent import ActivationCaching
-from tdhook.workflow import Workflow
-from xdrl import TDHookWorkflowRunner
-
-workflow = Workflow(
-    ActivationCaching("module.0", cache_key=("activations", "encoder"))
-)
-execution = TDHookWorkflowRunner(interaction).run(
-    workflow, batch, code_revision="your-git-revision"
-)
-encoder_activations = execution.data["activations", "encoder"]
-```
-
-For the complete setup, see [Getting Started](https://xdrl.readthedocs.io/en/latest/start.html).
+Follow the [Quickstart notebook](https://xdrl.readthedocs.io/en/latest/notebooks/quickstart.html)
+to declare a policy interaction and run a TDHook workflow.
 
 ## Development
 
