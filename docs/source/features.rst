@@ -1,15 +1,50 @@
 Features
 ========
 
-XDRL adds a small typed boundary around TorchRL model calls:
+.. grid:: 1 2 3 3
+   :gutter: 3
 
-* **Contracts:** native TensorDict keys, TorchRL specs, model roles, phases,
-  and named batch dimensions.
-* **Runtime contexts:** input/output validation with restoration of module,
-  gradient, inference, autocast, and exploration state.
-* **TDHook workflows:** validated targets, observation and intervention,
-  planned model-pass counts, and cleanup after failures.
-* **RL semantics:** optional recurrent state, reset/window, and multi-agent
-  topology declarations.
-* **Provenance:** the interaction, workflow plan, dependency versions, code
-  revision, and observed model calls.
+   .. grid-item-card::
+      :class-card: surface
+
+      .. raw:: html
+
+         <i class="fa-solid fa-list-check fa-2x"></i>
+         <h5>Contracts</h5>
+         <p>Native keys, specs, roles, phases, and batch dimensions.</p>
+
+   .. grid-item-card::
+      :class-card: surface
+
+      .. raw:: html
+
+         <i class="fa-solid fa-arrows-rotate fa-2x"></i>
+         <h5>Contexts</h5>
+         <p>Validated calls with state restoration.</p>
+
+   .. grid-item-card::
+      :class-card: surface
+
+      .. raw:: html
+
+         <i class="fa-solid fa-wave-square fa-2x"></i>
+         <h5>TDHook workflows</h5>
+         <p>Observation, intervention, planned passes, and cleanup.</p>
+
+   .. grid-item-card::
+      :class-card: surface
+
+      .. raw:: html
+
+         <i class="fa-solid fa-people-group fa-2x"></i>
+         <h5>RL semantics</h5>
+         <p>Recurrent state, reset windows, and multi-agent topology.</p>
+
+   .. grid-item-card::
+      :class-card: surface
+
+      .. raw:: html
+
+         <i class="fa-solid fa-receipt fa-2x"></i>
+         <h5>Provenance</h5>
+         <p>Interaction, plan, versions, revision, and model calls.</p>

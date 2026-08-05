@@ -58,35 +58,35 @@
                 API Reference
 
 
-.. div:: sd-fs-1 sd-font-weight-bold sd-text-center sd-text-primary sd-mb-5
+.. grid:: 1 2 3 3
+   :gutter: 3
 
-  What XDRL adds
+   .. grid-item-card::
+      :link: start
+      :class-card: surface
 
-.. grid:: 1 1 2 2
-    :class-container: features
+      .. raw:: html
 
-    .. grid-item::
+         <i class="fa-solid fa-rocket fa-2x"></i>
+         <h5>Getting Started</h5>
+         <p>Run one typed model interaction.</p>
 
-      .. div:: features-container
+   .. grid-item-card::
+      :link: features
+      :class-card: surface
 
-        .. image:: _static/images/one.png
-          :width: 150
+      .. raw:: html
 
-        .. div::
+         <i class="fa-solid fa-shield-halved fa-2x"></i>
+         <h5>Features</h5>
+         <p>Contracts, workflows, and provenance.</p>
 
-          **Typed interaction contracts**
+   .. grid-item-card::
+      :link: tutorials
+      :class-card: surface
 
-          Declare model roles, TensorDict schemas, phases, and batch semantics.
+      .. raw:: html
 
-    .. grid-item::
-
-      .. div:: features-container
-
-        .. image:: _static/images/two.png
-          :width: 150
-
-        .. div::
-
-          **TDHook-powered interpretability**
-
-          Run TDHook workflows against declared TorchRL model interactions.
+         <i class="fa-solid fa-book-open fa-2x"></i>
+         <h5>Tutorials</h5>
+         <p>Notebook-first examples.</p>
