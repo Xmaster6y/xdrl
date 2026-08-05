@@ -1,5 +1,0 @@
-defaults:
-  - jz_base
-
-cpus_per_task: 3
-partition: gpu_p2l

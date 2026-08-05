@@ -15,7 +15,7 @@ import xdrl
 
 ROOT = Path(__file__).parents[2]
 SKILL = ROOT / "skills" / "xdrl-library"
-REFERENCE = SKILL / "references" / "xdrl-0.1.md"
+REFERENCE = SKILL / "references" / "xdrl-0.2.md"
 
 
 def _runnable_examples(markdown: str) -> list[str]:
@@ -68,3 +68,5 @@ def test_skill_is_versioned_and_names_evidence_boundaries() -> None:
     )
     assert "tests/behavioural_parity" in reference
     assert "compiled" in reference.casefold() and "distributed" in reference.casefold()
+    assert "TDHookWorkflowRunner" in reference
+    assert "HookSession" in reference

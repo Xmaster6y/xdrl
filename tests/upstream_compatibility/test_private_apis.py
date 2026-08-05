@@ -4,9 +4,7 @@ import tomllib
 import pytest
 import torch
 from tensordict.nn import TensorDictModule
-from torchrl.trainers.algorithms.configs.common import _normalize_hydra_key
-from torchrl.record.loggers.wandb import WandbLogger
-from torchrl.trainers.trainers import Trainer, _resolve_module
+from tdhook.workflow import Workflow
 
 from xdrl.compatibility import (
     PRIVATE_UPSTREAM_APIS,
@@ -27,21 +25,17 @@ def test_private_upstream_inventory_is_owned_by_this_suite() -> None:
 
 
 @pytest.mark.upstream_compatibility
-def test_torchrl_private_surfaces_remain_available(tmp_path: Path) -> None:
-    assert callable(_normalize_hydra_key)
-    assert callable(_resolve_module)
-    assert callable(Trainer._log)
-    logger = WandbLogger("private-api-compatibility", offline=True, save_dir=str(tmp_path))
-    assert logger._step_registry == {}
-
-
-@pytest.mark.upstream_compatibility
 def test_compiled_module_marker_remains_fail_closed() -> None:
     policy = TensorDictModule(torch.nn.Linear(2, 1), in_keys=["observation"], out_keys=["action"])
     policy.module._orig_mod = policy.module
 
     with pytest.raises(NotImplementedError, match="torch.compile"):
         _reject_unsupported_module(policy)
+
+
+@pytest.mark.upstream_compatibility
+def test_workflow_plan_builder_remains_available_for_exact_execution_evidence() -> None:
+    assert callable(Workflow._build_plan)
 
 
 @pytest.mark.upstream_compatibility

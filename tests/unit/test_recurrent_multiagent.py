@@ -9,7 +9,7 @@ from torchrl.modules import LSTMModule, MultiAgentMLP, QMixer
 
 from xdrl.interactions import (
     AgentSelector,
-    InteractionDescriptor,
+    InteractionContract,
     InteractionPhase,
     InteractionTopology,
     MultiAgentSemantics,
@@ -17,27 +17,25 @@ from xdrl.interactions import (
     RecurrentSemantics,
     RecurrentStateTransition,
     RuntimeInteractionContext,
-    SchemaSnapshot,
     SemanticTarget,
 )
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
 
-def _descriptor(
+def _contract(
     role: ModelRole,
     module_path: str,
     inputs: TensorDictSchema,
     outputs: TensorDictSchema,
     **kwargs: object,
-) -> InteractionDescriptor:
-    return InteractionDescriptor(
+) -> InteractionContract:
+    return InteractionContract(
         identity=f"{role.value}:0",
         role=role,
         phase=InteractionPhase.COLLECTION,
         module_path=module_path,
-        input_schema=SchemaSnapshot.from_schema(inputs),
-        output_schema=SchemaSnapshot.from_schema(outputs),
-        batch_dimensions=inputs.batch.dimensions,
+        input_schema=inputs,
+        output_schema=outputs,
         **kwargs,
     )
 
@@ -84,7 +82,7 @@ def test_torchrl_lstm_state_transitions_and_reset_masks_are_validated() -> None:
         reset_keys=(("is_init",),),
         collector_mode=RecurrentCollectorMode.SYNC,
     )
-    descriptor = _descriptor(ModelRole.ACTOR, "policy.lstm", inputs, outputs, recurrent=recurrent)
+    contract = _contract(ModelRole.ACTOR, "policy.lstm", inputs, outputs, recurrent=recurrent)
     module = LSTMModule(
         input_size=3,
         hidden_size=4,
@@ -103,13 +101,13 @@ def test_torchrl_lstm_state_transitions_and_reset_masks_are_validated() -> None:
     )
     zero_state = batch.clone().set("rs_h", torch.zeros_like(state)).set("rs_c", torch.zeros_like(state))
     expected_reset = module(zero_state)["next", "rs_h"][0].clone()
-    context = RuntimeInteractionContext(descriptor, module, inputs, outputs, batch)
+    context = RuntimeInteractionContext(contract, module, batch)
 
     result = context(batch.clone())
 
     assert torch.allclose(result["next", "rs_h"][0], expected_reset)
     assert result["next", "rs_h"].shape == state.shape
-    json.dumps(descriptor.to_dict())
+    json.dumps(contract.to_dict())
 
 
 def test_recurrent_contract_rejects_bad_masks_and_unsupported_collectors() -> None:
@@ -134,12 +132,12 @@ def test_recurrent_contract_rejects_bad_masks_and_unsupported_collectors() -> No
         transitions=(RecurrentStateTransition(("state",), ("next", "state")),),
         reset_keys=(("is_init",),),
     )
-    descriptor = _descriptor(ModelRole.ACTOR, "policy.rnn", inputs, outputs, recurrent=recurrent)
+    contract = _contract(ModelRole.ACTOR, "policy.rnn", inputs, outputs, recurrent=recurrent)
     batch = TensorDict(
         {"state": torch.zeros(2, 1), "is_init": torch.zeros(2, 1, dtype=torch.bool)},
         batch_size=[2],
     )
-    context = RuntimeInteractionContext(descriptor, torch.nn.Identity(), inputs, outputs, batch)
+    context = RuntimeInteractionContext(contract, torch.nn.Identity(), batch)
 
     with pytest.raises(ValueError, match="boolean tensor"):
         with context:
@@ -203,7 +201,7 @@ def test_recurrent_contract_rejects_non_state_transition_keys() -> None:
     )
 
     with pytest.raises(ValueError, match="must be required state"):
-        _descriptor(ModelRole.ACTOR, "policy.rnn", inputs, outputs, recurrent=recurrent)
+        _contract(ModelRole.ACTOR, "policy.rnn", inputs, outputs, recurrent=recurrent)
 
 
 @pytest.mark.parametrize(
@@ -222,7 +220,7 @@ def test_recurrent_contract_rejects_non_state_transition_keys() -> None:
         (RecurrentStateTransition(("state",), ("next", "state")), (), "time", "time", "declared batch"),
     ],
 )
-def test_recurrent_descriptor_rejects_invalid_key_and_time_declarations(
+def test_recurrent_contract_rejects_invalid_key_and_time_declarations(
     transition: RecurrentStateTransition,
     reset_keys: tuple[tuple[str, ...], ...],
     time_dimension: str | None,
@@ -233,7 +231,7 @@ def test_recurrent_descriptor_rejects_invalid_key_and_time_declarations(
     recurrent = RecurrentSemantics((transition,), reset_keys, sequence_dimension=sequence_dimension)
 
     with pytest.raises(ValueError, match=message):
-        _descriptor(
+        _contract(
             ModelRole.ACTOR,
             "policy.rnn",
             inputs,
@@ -252,7 +250,7 @@ def test_recurrent_descriptor_rejects_invalid_key_and_time_declarations(
         (InteractionTopology.MIXER, ModelRole.ACTOR, ModelRole.ACTOR, "agent", "mixer model role"),
     ],
 )
-def test_multi_agent_descriptor_rejects_invalid_role_and_axis_contracts(
+def test_multi_agent_contract_rejects_invalid_role_and_axis_contracts(
     topology: InteractionTopology,
     role: ModelRole,
     target_role: ModelRole,
@@ -263,7 +261,7 @@ def test_multi_agent_descriptor_rejects_invalid_role_and_axis_contracts(
     semantics = MultiAgentSemantics(topology, "agents", 2, SemanticTarget(target_role, AgentSelector("agents")))
 
     with pytest.raises(ValueError, match=message):
-        _descriptor(
+        _contract(
             role,
             "policy.module",
             schema,
@@ -293,7 +291,7 @@ def test_replay_sequence_serialises_time_axis_burn_in_and_truncated_window() -> 
         truncated_window=8,
         collector_mode=RecurrentCollectorMode.REPLAY_SEQUENCE,
     )
-    descriptor = _descriptor(
+    contract = _contract(
         ModelRole.ACTOR,
         "policy.rnn",
         inputs,
@@ -302,7 +300,7 @@ def test_replay_sequence_serialises_time_axis_burn_in_and_truncated_window() -> 
         recurrent=recurrent,
     )
 
-    encoded = json.loads(json.dumps(descriptor.to_dict()))["recurrent"]
+    encoded = json.loads(json.dumps(contract.to_dict()))["recurrent"]
 
     assert encoded["sequence_dimension"] == "time"
     assert encoded["burn_in"] == 2
@@ -339,7 +337,7 @@ def test_vmas_parameter_sharing_uses_a_semantic_group_target() -> None:
         n_agents=n_agents,
         target=SemanticTarget(ModelRole.ACTOR, AgentSelector("agents")),
     )
-    descriptor = _descriptor(
+    contract = _contract(
         ModelRole.ACTOR,
         "policy.module",
         inputs,
@@ -357,11 +355,11 @@ def test_vmas_parameter_sharing_uses_a_semantic_group_target() -> None:
         batch_size=[5],
     )
 
-    result = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)(batch.clone())
+    result = RuntimeInteractionContext(contract, policy, batch)(batch.clone())
 
     assert result["agents", "action"].shape == (5, n_agents, 2)
-    assert descriptor.multi_agent.target.selector.agents == ()
-    assert descriptor.module_path == "policy.module"
+    assert contract.multi_agent.target.selector.agents == ()
+    assert contract.module_path == "policy.module"
 
 
 @pytest.mark.parametrize(
@@ -374,7 +372,7 @@ def test_vmas_parameter_sharing_uses_a_semantic_group_target() -> None:
 def test_centralised_critic_and_mixer_roles_are_serialisable(topology: InteractionTopology, role: ModelRole) -> None:
     schema = TensorDictSchema((), BatchSemantics(("env",)))
     semantics = MultiAgentSemantics(topology, "agents", 3, SemanticTarget(role, AgentSelector("agents")))
-    descriptor = _descriptor(
+    contract = _contract(
         role,
         "loss.mixer" if role is ModelRole.MIXER else "loss.critic",
         schema,
@@ -383,7 +381,7 @@ def test_centralised_critic_and_mixer_roles_are_serialisable(topology: Interacti
         multi_agent=semantics,
     )
 
-    assert json.loads(json.dumps(descriptor.to_dict()))["multi_agent"]["topology"] == topology.value
+    assert json.loads(json.dumps(contract.to_dict()))["multi_agent"]["topology"] == topology.value
 
 
 def test_qmix_reference_preserves_nested_agent_keys_and_environment_batch() -> None:
@@ -404,7 +402,7 @@ def test_qmix_reference_preserves_nested_agent_keys_and_environment_batch() -> N
         n_agents,
         SemanticTarget(ModelRole.MIXER, AgentSelector("agents")),
     )
-    descriptor = _descriptor(
+    contract = _contract(
         ModelRole.MIXER,
         "loss.mixer_network",
         inputs,
@@ -425,6 +423,6 @@ def test_qmix_reference_preserves_nested_agent_keys_and_environment_batch() -> N
         batch_size=[2],
     )
 
-    result = RuntimeInteractionContext(descriptor, mixer, inputs, outputs, batch)(batch.clone())
+    result = RuntimeInteractionContext(contract, mixer, batch)(batch.clone())
 
     assert result["chosen_action_value"].shape == (2, 1)

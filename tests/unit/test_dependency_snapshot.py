@@ -96,6 +96,18 @@ def test_generated_views_share_the_same_snapshot() -> None:
     assert "``==0.12.0+g12345678``" in documentation
 
 
+def test_generated_views_pin_pytorch_prereleases_exactly() -> None:
+    snapshot = (
+        Dependency("torch", "2.14.0.dev20260805+cpu", None),
+        Dependency("tensordict", "0.12.2", None),
+        Dependency("torchrl", "0.12.0", None),
+        Dependency("tdhook", "0.1.3", None),
+        Dependency("xdrl", "0.1.0", None),
+    )
+
+    assert 'VersionRequirement("torch", "==2.14.0.dev20260805+cpu")' in compatibility_block(snapshot)
+
+
 def test_report_makes_registry_and_revision_changes_explicit() -> None:
     old = (Dependency("torch", "2.11.0", None), Dependency("torchrl", "0.12.0", "a" * 40))
     new = (Dependency("torch", "2.12.0", None), Dependency("torchrl", "0.13.0", "b" * 40))

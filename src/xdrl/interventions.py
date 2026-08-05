@@ -1,35 +1,29 @@
 """Explicit, checked interventions for typed RL interactions.
 
-The public objects here describe *mechanics*, not causal conclusions.  A
-TensorDict intervention is applied by ``RuntimeInteractionContext`` while
-activation and gradient interventions are exposed as a TDHook factory.
+The public objects here describe *mechanics*, not causal conclusions. XDRL
+owns only TensorDict boundary edits applied by ``RuntimeInteractionContext``.
+TDHook owns activation, gradient, and parameter interventions.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import torch
 from tensordict import TensorDictBase
-from tdhook.contexts import HookingContextFactory
-from tdhook.hooks import MultiHookHandle, resolve_submodule_path
-from tdhook.modules import HookedModule
-
 from xdrl.types import KeyPresence, TensorDictKey, TensorDictSchema
 
 if TYPE_CHECKING:
-    from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext
+    from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 
 
 class InterventionTarget(str, Enum):
     """The execution boundary an intervention edits."""
 
     TENSORDICT = "tensordict"
-    ACTIVATION = "activation"
-    GRADIENT = "gradient"
 
 
 class InterventionTiming(str, Enum):
@@ -44,7 +38,7 @@ class InterventionValidationError(ValueError):
 
 
 TensorTransform = Callable[[torch.Tensor], torch.Tensor]
-InteractionPredicate = Callable[["InteractionDescriptor"], bool]
+InteractionPredicate = Callable[["InteractionContract"], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,15 +53,15 @@ class InterventionScope:
     exploration_mode: str | None = None
     predicate: InteractionPredicate | None = field(default=None, compare=False, repr=False)
 
-    def matches(self, descriptor: "InteractionDescriptor") -> bool:
+    def matches(self, contract: "InteractionContract") -> bool:
         return (
-            (self.phases is None or descriptor.phase in self.phases)
-            and (self.roles is None or descriptor.role in self.roles)
-            and (self.environment is None or descriptor.environment == self.environment)
-            and (self.time_dimension is None or descriptor.time_dimension == self.time_dimension)
-            and (self.agent_dimension is None or descriptor.agent_dimension == self.agent_dimension)
-            and (self.exploration_mode is None or descriptor.exploration_mode == self.exploration_mode)
-            and (self.predicate is None or self.predicate(descriptor))
+            (self.phases is None or contract.phase in self.phases)
+            and (self.roles is None or contract.role in self.roles)
+            and (self.environment is None or contract.environment == self.environment)
+            and (self.time_dimension is None or contract.time_dimension == self.time_dimension)
+            and (self.agent_dimension is None or contract.agent_dimension == self.agent_dimension)
+            and (self.exploration_mode is None or contract.exploration_mode == self.exploration_mode)
+            and (self.predicate is None or self.predicate(contract))
         )
 
 
@@ -75,9 +69,9 @@ class InterventionScope:
 class Intervention:
     """One replacement or transform at an explicit, checked target.
 
-    ``key`` is required for ``TENSORDICT`` interventions and ``module_path``
-    is required for TDHook activation and gradient interventions.  Exactly one
-    of ``replacement`` and ``transform`` must be supplied.
+    ``key`` identifies a declared TensorDict input or output. Exactly one of
+    ``replacement`` and ``transform`` must be supplied. Model-internal targets
+    belong to TDHook's ``Target`` and ``HookSession`` APIs.
     """
 
     identifier: str
@@ -94,14 +88,11 @@ class Intervention:
             raise InterventionValidationError("intervention identifier must be non-empty")
         if (self.replacement is None) == (self.transform is None):
             raise InterventionValidationError("provide exactly one of replacement or transform")
-        if self.target is InterventionTarget.TENSORDICT:
-            if self.key is None or self.module_path is not None:
-                raise InterventionValidationError("TensorDict interventions require key and forbid module_path")
-        elif self.module_path is None or self.key is not None:
-            raise InterventionValidationError(f"{self.target.value} interventions require module_path and forbid key")
+        if self.key is None or self.module_path is not None:
+            raise InterventionValidationError("TensorDict interventions require key and forbid module_path")
 
-    def applies_to(self, descriptor: "InteractionDescriptor") -> bool:
-        return self.scope.matches(descriptor)
+    def applies_to(self, contract: "InteractionContract") -> bool:
+        return self.scope.matches(contract)
 
     def edit_tensor(self, value: torch.Tensor, *, label: str) -> torch.Tensor:
         result = self.replacement if self.replacement is not None else self.transform(value)  # type: ignore[misc]
@@ -147,7 +138,7 @@ class InterventionController:
 
     def validate(self, interaction: "RuntimeInteractionContext") -> None:
         for intervention in self.interventions:
-            if not intervention.applies_to(interaction.descriptor):
+            if not intervention.applies_to(interaction.contract):
                 continue
             if intervention.target is not InterventionTarget.TENSORDICT:
                 continue
@@ -165,7 +156,7 @@ class InterventionController:
         for intervention in self.interventions:
             if intervention.target is not InterventionTarget.TENSORDICT or intervention.timing is not timing:
                 continue
-            if not intervention.applies_to(interaction.descriptor):
+            if not intervention.applies_to(interaction.contract):
                 continue
             assert intervention.key is not None
             value = tensordict.get(intervention.key)
@@ -185,8 +176,8 @@ class InterventionController:
                     intervention.identifier,
                     intervention.target,
                     timing,
-                    interaction.descriptor.identity,
-                    interaction.descriptor.checkpoint_id,
+                    interaction.contract.identity,
+                    interaction.contract.checkpoint_id,
                     len(self.records),
                 )
             )
@@ -204,11 +195,11 @@ def run_paired(
     and execution modes in TorchRL.  This helper only enforces the provenance
     identity needed to compare their outputs safely.
     """
-    baseline_descriptor = baseline.descriptor
-    intervention_descriptor = intervention.descriptor
+    baseline_contract = baseline.contract
+    intervention_contract = intervention.contract
     if (
-        baseline_descriptor.identity != intervention_descriptor.identity
-        or baseline_descriptor.checkpoint_id != intervention_descriptor.checkpoint_id
+        baseline_contract.identity != intervention_contract.identity
+        or baseline_contract.checkpoint_id != intervention_contract.checkpoint_id
     ):
         raise InterventionValidationError(
             "paired executions must share interaction identity and checkpoint provenance"
@@ -228,84 +219,11 @@ def run_paired(
         # random draw into the caller's next interaction.
         _set_rng_state(post_baseline_rng_state)
     return PairedInterventionResult(
-        baseline_descriptor.identity,
-        baseline_descriptor.checkpoint_id,
+        baseline_contract.identity,
+        baseline_contract.checkpoint_id,
         baseline_output,
         intervention_output,
     )
-
-
-class TDHookInterventionFactory(HookingContextFactory):
-    """Install activation/gradient edits through TDHook's managed lifecycle."""
-
-    def __init__(self, interaction: "RuntimeInteractionContext", interventions: Sequence[Intervention]) -> None:
-        super().__init__()
-        self._interaction = interaction
-        self._interventions = tuple(interventions)
-        for intervention in self._interventions:
-            if intervention.target is InterventionTarget.TENSORDICT:
-                raise InterventionValidationError(
-                    "TDHookInterventionFactory accepts activation or gradient interventions only"
-                )
-            if (
-                intervention.applies_to(interaction.descriptor)
-                and intervention.target is InterventionTarget.GRADIENT
-                and (not interaction.descriptor.gradient_enabled or interaction.descriptor.inference_mode)
-            ):
-                raise InterventionValidationError(
-                    f"{intervention.identifier}: gradient interventions require gradient_enabled=True and inference_mode=False"
-                )
-
-    def prepare(self, module: Any, *args: Any, **kwargs: Any) -> Any:
-        """Validate paths against TDHook's selected module immediately before preparation."""
-        for intervention in self._interventions:
-            if not intervention.applies_to(self._interaction.descriptor):
-                continue
-            assert intervention.module_path is not None
-            try:
-                resolve_submodule_path(module, intervention.module_path)
-            except ValueError as error:
-                raise InterventionValidationError(
-                    f"{intervention.identifier}: cannot resolve TDHook target {intervention.module_path!r}"
-                ) from error
-        return super().prepare(module, *args, **kwargs)
-
-    def _hook_module(self, module: HookedModule) -> MultiHookHandle:
-        handles = []
-        for intervention in self._interventions:
-            if not intervention.applies_to(self._interaction.descriptor):
-                continue
-            assert intervention.module_path is not None
-            direction = _hook_direction(intervention)
-
-            def callback(
-                *, intervention: Intervention = intervention, direction: str = direction, **kwargs: Any
-            ) -> torch.Tensor | tuple[torch.Tensor, ...]:
-                container = (
-                    kwargs["output"]
-                    if direction == "fwd"
-                    else (
-                        kwargs["args"]
-                        if direction == "fwd_pre"
-                        else kwargs["grad_input"]
-                        if direction == "bwd"
-                        else kwargs["grad_output"]
-                    )
-                )
-                if isinstance(container, torch.Tensor):
-                    return intervention.edit_tensor(container, label=f"TDHook target {intervention.module_path}")
-                tensor_indices = [index for index, value in enumerate(container) if isinstance(value, torch.Tensor)]
-                if len(tensor_indices) != 1:
-                    raise InterventionValidationError(
-                        f"{intervention.identifier}: TDHook target {intervention.module_path!r} received "
-                        f"{len(tensor_indices)} tensor values; select a module with one tensor input or output"
-                    )
-                index = tensor_indices[0]
-                edited = intervention.edit_tensor(container[index], label=f"TDHook target {intervention.module_path}")
-                return (*container[:index], edited, *container[index + 1 :])
-
-            handles.append(module.set(intervention.module_path, None, callback=callback, direction=direction))
-        return MultiHookHandle(handles)
 
 
 def _validate_key(intervention: Intervention, schema: TensorDictSchema) -> None:
@@ -315,12 +233,6 @@ def _validate_key(intervention: Intervention, schema: TensorDictSchema) -> None:
         raise InterventionValidationError(
             f"{intervention.identifier}: key {_display_key(intervention.key)} is not a declared {expected.value} key"
         )
-
-
-def _hook_direction(intervention: Intervention) -> str:
-    if intervention.target is InterventionTarget.ACTIVATION:
-        return "fwd_pre" if intervention.timing is InterventionTiming.INPUT else "fwd"
-    return "bwd" if intervention.timing is InterventionTiming.INPUT else "bwd_pre"
 
 
 def _display_key(key: TensorDictKey) -> str:

@@ -1,6 +1,0 @@
-defaults:
-  - basic
-
-max_batch_size: null
-params:
-  seed: choice(0, 1, 2)

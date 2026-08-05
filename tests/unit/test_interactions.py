@@ -10,11 +10,10 @@ from torchrl.envs.utils import exploration_type
 from torchrl.data import Bounded
 
 from xdrl.interactions import (
-    InteractionDescriptor,
+    InteractionContract,
     InteractionPhase,
     LifecycleEventType,
     RuntimeInteractionContext,
-    SchemaSnapshot,
 )
 from xdrl.interventions import (
     Intervention,
@@ -41,17 +40,16 @@ def _policy() -> TensorDictModule:
     return TensorDictModule(torch.nn.Linear(2, 1, bias=False), in_keys=["observation"], out_keys=["action"])
 
 
-def _descriptor(
+def _contract(
     phase: InteractionPhase, input_schema: TensorDictSchema, output_schema: TensorDictSchema
-) -> InteractionDescriptor:
-    return InteractionDescriptor(
+) -> InteractionContract:
+    return InteractionContract(
         identity=f"policy:{phase.value}:7",
         role=ModelRole.ACTOR,
         phase=phase,
         module_path="policy.module",
-        input_schema=SchemaSnapshot.from_schema(input_schema),
-        output_schema=SchemaSnapshot.from_schema(output_schema),
-        batch_dimensions=("env",),
+        input_schema=input_schema,
+        output_schema=output_schema,
         exploration_mode="random" if phase is InteractionPhase.COLLECTION else "deterministic",
         gradient_enabled=False,
         logical_step=7,
@@ -61,20 +59,16 @@ def _descriptor(
 def test_collection_and_evaluation_are_distinct_contexts_for_one_policy() -> None:
     inputs, outputs = _schemas()
     batch = TensorDict({"observation": torch.zeros(3, 2)}, batch_size=[3])
-    collection = RuntimeInteractionContext(
-        _descriptor(InteractionPhase.COLLECTION, inputs, outputs), _policy(), inputs, outputs, batch
-    )
-    evaluation = RuntimeInteractionContext(
-        _descriptor(InteractionPhase.EVALUATION, inputs, outputs), _policy(), inputs, outputs, batch
-    )
+    collection = RuntimeInteractionContext(_contract(InteractionPhase.COLLECTION, inputs, outputs), _policy(), batch)
+    evaluation = RuntimeInteractionContext(_contract(InteractionPhase.EVALUATION, inputs, outputs), _policy(), batch)
 
     with collection:
         collection.invoke(batch.clone())
     with evaluation:
         evaluation.invoke(batch.clone())
 
-    assert collection.descriptor.identity != evaluation.descriptor.identity
-    assert collection.descriptor.exploration_mode != evaluation.descriptor.exploration_mode
+    assert collection.contract.identity != evaluation.contract.identity
+    assert collection.contract.exploration_mode != evaluation.contract.exploration_mode
     assert [event.kind for event in collection.events] == [LifecycleEventType.BEFORE, LifecycleEventType.AFTER]
     assert [event.order for event in evaluation.events] == [0, 1]
 
@@ -92,10 +86,10 @@ def test_context_restores_execution_and_hook_state_after_exception() -> None:
         finally:
             entered.append("exited")
 
-    descriptor = _descriptor(InteractionPhase.COLLECTION, inputs, outputs)
+    contract = _contract(InteractionPhase.COLLECTION, inputs, outputs)
     original_exploration = exploration_type()
     original_grad = torch.is_grad_enabled()
-    context = RuntimeInteractionContext(descriptor, _policy(), inputs, outputs, batch, hook_state)
+    context = RuntimeInteractionContext(contract, _policy(), batch, hook_state)
     with pytest.raises(RuntimeError, match="boom"):
         with context:
             assert exploration_type().value == "random"
@@ -111,8 +105,8 @@ def test_one_shot_call_is_a_synchronous_policy_and_restores_model_mode() -> None
     batch = TensorDict({"observation": torch.zeros(2, 2)}, batch_size=[2])
     policy = _policy()
     policy.train()
-    descriptor = replace(
-        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+    contract = replace(
+        _contract(InteractionPhase.EVALUATION, inputs, outputs),
         module_training=False,
     )
     observed_modes: list[bool] = []
@@ -123,7 +117,7 @@ def test_one_shot_call_is_a_synchronous_policy_and_restores_model_mode() -> None
         return original_forward(value)
 
     policy.module.forward = record_mode
-    context = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+    context = RuntimeInteractionContext(contract, policy, batch)
 
     result = context(batch.clone())
 
@@ -140,11 +134,11 @@ def test_context_restores_mixed_submodule_modes_after_failure() -> None:
     policy.train()
     policy.module.eval()
     original_modes = tuple(module.training for module in policy.modules())
-    descriptor = replace(
-        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+    contract = replace(
+        _contract(InteractionPhase.EVALUATION, inputs, outputs),
         module_training=False,
     )
-    context = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
+    context = RuntimeInteractionContext(contract, policy, batch)
 
     with pytest.raises(RuntimeError, match="boom"):
         with context:
@@ -169,11 +163,11 @@ def test_context_applies_and_restores_mode_on_an_invocation_override() -> None:
         return original_forward(value)
 
     override.module.forward = record_mode
-    descriptor = replace(
-        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+    contract = replace(
+        _contract(InteractionPhase.EVALUATION, inputs, outputs),
         module_training=False,
     )
-    context = RuntimeInteractionContext(descriptor, wrapped_policy, inputs, outputs, batch)
+    context = RuntimeInteractionContext(contract, wrapped_policy, batch)
 
     with context:
         context.invoke(batch.clone(), module=override)
@@ -188,9 +182,9 @@ def test_context_applies_and_restores_mode_on_an_invocation_override() -> None:
 def test_context_enables_gradients_inside_outer_inference_mode() -> None:
     inputs, outputs = _schemas()
     batch = TensorDict({"observation": torch.zeros(1, 2)}, batch_size=[1])
-    descriptor = _descriptor(InteractionPhase.OPTIMISATION, inputs, outputs)
-    descriptor = replace(descriptor, gradient_enabled=True, inference_mode=False)
-    context = RuntimeInteractionContext(descriptor, _policy(), inputs, outputs, batch)
+    contract = _contract(InteractionPhase.OPTIMISATION, inputs, outputs)
+    contract = replace(contract, gradient_enabled=True, inference_mode=False)
+    context = RuntimeInteractionContext(contract, _policy(), batch)
 
     with torch.inference_mode():
         with context:
@@ -199,7 +193,8 @@ def test_context_enables_gradients_inside_outer_inference_mode() -> None:
         assert torch.is_inference_mode_enabled()
 
 
-def test_schema_snapshot_preserves_spec_constraints() -> None:
+def test_contract_serialisation_preserves_spec_constraints() -> None:
+    inputs, _ = _schemas()
     lower = TensorDictSchema(
         (KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED, Bounded(low=-1, high=1, shape=(2,))),),
         BatchSemantics(("env",)),
@@ -209,51 +204,70 @@ def test_schema_snapshot_preserves_spec_constraints() -> None:
         BatchSemantics(("env",)),
     )
 
-    lower_key = SchemaSnapshot.from_schema(lower).keys[0]
-    wider_key = SchemaSnapshot.from_schema(wider).keys[0]
-    assert lower_key.spec_type == wider_key.spec_type
-    assert lower_key.feature_shape == wider_key.feature_shape
-    assert lower_key.spec_constraints != wider_key.spec_constraints
-    descriptor = InteractionDescriptor(
-        "policy:output:0",
-        ModelRole.ACTOR,
-        InteractionPhase.EVALUATION,
-        "policy.module",
-        SchemaSnapshot.from_schema(lower),
-        SchemaSnapshot.from_schema(wider),
+    lower_contract = InteractionContract(
+        "policy:output:lower", ModelRole.ACTOR, InteractionPhase.EVALUATION, "policy.module", inputs, lower
     )
-    json.dumps(descriptor.to_dict())
+    wider_contract = replace(lower_contract, identity="policy:output:wider", output_schema=wider)
+    lower_key = lower_contract.to_dict()["output_schema"]["keys"][0]
+    wider_key = wider_contract.to_dict()["output_schema"]["keys"][0]
+
+    assert lower_key["spec_type"] == wider_key["spec_type"]
+    assert lower_key["feature_shape"] == wider_key["feature_shape"]
+    assert lower_key["spec_constraints"] != wider_key["spec_constraints"]
+    json.dumps(lower_contract.to_dict())
 
 
-def test_context_rejects_schema_that_disagrees_with_descriptor() -> None:
+def test_contract_rejects_disagreeing_input_and_output_batch_semantics() -> None:
     inputs, outputs = _schemas()
-    batch = TensorDict({"observation": torch.zeros(1, 2)}, batch_size=[1])
     different_outputs = TensorDictSchema(
-        (KeySchema("different_action", KeyRole.ACTION, KeyPresence.PRODUCED),), BatchSemantics(("env",))
+        (KeySchema("different_action", KeyRole.ACTION, KeyPresence.PRODUCED),), BatchSemantics(("time",))
     )
 
-    with pytest.raises(ValueError, match="output_schema does not match"):
-        RuntimeInteractionContext(
-            _descriptor(InteractionPhase.EVALUATION, inputs, outputs), _policy(), inputs, different_outputs, batch
+    with pytest.raises(ValueError, match="identical batch semantics"):
+        InteractionContract(
+            "policy:evaluation:mismatch",
+            ModelRole.ACTOR,
+            InteractionPhase.EVALUATION,
+            "policy.module",
+            inputs,
+            different_outputs,
         )
 
 
-def test_descriptor_model_identity_does_not_shift_existing_positional_fields() -> None:
+def test_contract_owns_live_schemas_and_derives_batch_semantics() -> None:
     inputs, outputs = _schemas()
-    descriptor = InteractionDescriptor(
+    contract = InteractionContract(
         "policy:collection:1",
         ModelRole.ACTOR,
         InteractionPhase.COLLECTION,
         "policy.module",
-        SchemaSnapshot.from_schema(inputs),
-        SchemaSnapshot.from_schema(outputs),
-        ("env",),
-        "CartPole",
+        inputs,
+        outputs,
+        environment="CartPole",
     )
 
-    assert descriptor.batch_dimensions == ("env",)
-    assert descriptor.environment == "CartPole"
-    assert descriptor.model_id is None
+    assert contract.batch_dimensions == ("env",)
+    assert contract.input_schema is inputs
+    assert contract.output_schema is outputs
+    assert contract.environment == "CartPole"
+    assert contract.model_id is None
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"identity": ""}, "identity must be non-empty"),
+        ({"module_path": ""}, "module_path must be non-empty"),
+        ({"gradient_enabled": True, "inference_mode": True}, "cannot both be enabled"),
+        ({"autocast_enabled": True}, "requires autocast_device_type"),
+    ],
+)
+def test_contract_rejects_invalid_identity_and_execution_modes(changes: dict[str, object], message: str) -> None:
+    inputs, outputs = _schemas()
+    contract = _contract(InteractionPhase.EVALUATION, inputs, outputs)
+
+    with pytest.raises(ValueError, match=message):
+        replace(contract, **changes)
 
 
 class _FailingPolicy:
@@ -269,11 +283,11 @@ class _InvalidOutputPolicy:
 def test_module_mode_requires_a_torch_module() -> None:
     inputs, outputs = _schemas()
     batch = TensorDict({"observation": torch.zeros(1, 2)}, batch_size=[1])
-    descriptor = replace(
-        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+    contract = replace(
+        _contract(InteractionPhase.EVALUATION, inputs, outputs),
         module_training=False,
     )
-    context = RuntimeInteractionContext(descriptor, _FailingPolicy(), inputs, outputs, batch)
+    context = RuntimeInteractionContext(contract, _FailingPolicy(), batch)
 
     with pytest.raises(TypeError, match="invoked module"):
         with context:
@@ -284,7 +298,7 @@ def test_failure_event_retains_only_diagnostics() -> None:
     inputs, outputs = _schemas()
     batch = TensorDict({"observation": torch.zeros(2, 2)}, batch_size=[2])
     context = RuntimeInteractionContext(
-        _descriptor(InteractionPhase.EVALUATION, inputs, outputs), _FailingPolicy(), inputs, outputs, batch
+        _contract(InteractionPhase.EVALUATION, inputs, outputs), _FailingPolicy(), batch
     )
 
     with context, pytest.raises(RuntimeError, match="policy failure"):
@@ -303,7 +317,7 @@ def test_output_validation_failure_reports_output_shapes() -> None:
     inputs, outputs = _schemas()
     batch = TensorDict({"observation": torch.zeros(2, 2)}, batch_size=[2])
     context = RuntimeInteractionContext(
-        _descriptor(InteractionPhase.EVALUATION, inputs, outputs), _InvalidOutputPolicy(), inputs, outputs, batch
+        _contract(InteractionPhase.EVALUATION, inputs, outputs), _InvalidOutputPolicy(), batch
     )
 
     with context, pytest.raises(Exception, match="missing produced key"):
@@ -316,7 +330,7 @@ def test_output_validation_failure_reports_output_shapes() -> None:
 def test_tensordict_interventions_are_checked_and_record_checkpoint_provenance() -> None:
     inputs, outputs = _schemas()
     batch = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
-    descriptor = replace(_descriptor(InteractionPhase.EVALUATION, inputs, outputs), checkpoint_id="checkpoint-9")
+    contract = replace(_contract(InteractionPhase.EVALUATION, inputs, outputs), checkpoint_id="checkpoint-9")
     no_op = Intervention(
         "control",
         InterventionTarget.TENSORDICT,
@@ -334,13 +348,9 @@ def test_tensordict_interventions_are_checked_and_record_checkpoint_provenance()
     policy = _policy()
     with torch.no_grad():
         policy.module.weight.zero_()
-    baseline = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
-    control = RuntimeInteractionContext(
-        descriptor, policy, inputs, outputs, batch, interventions=InterventionController((no_op,))
-    )
-    steered = RuntimeInteractionContext(
-        descriptor, policy, inputs, outputs, batch, interventions=InterventionController((changed,))
-    )
+    baseline = RuntimeInteractionContext(contract, policy, batch)
+    control = RuntimeInteractionContext(contract, policy, batch, interventions=InterventionController((no_op,)))
+    steered = RuntimeInteractionContext(contract, policy, batch, interventions=InterventionController((changed,)))
 
     control_result = run_paired(baseline, control, batch)
     result = run_paired(baseline, steered, batch)
@@ -349,16 +359,16 @@ def test_tensordict_interventions_are_checked_and_record_checkpoint_provenance()
     actual = result.intervention.get("action")
 
     assert torch.equal(actual, expected + 1)
-    assert (result.interaction_id, result.checkpoint_id) == (descriptor.identity, "checkpoint-9")
+    assert (result.interaction_id, result.checkpoint_id) == (contract.identity, "checkpoint-9")
     record = steered.interventions.records[0]
-    assert (record.interaction_id, record.checkpoint_id) == (descriptor.identity, "checkpoint-9")
+    assert (record.interaction_id, record.checkpoint_id) == (contract.identity, "checkpoint-9")
 
 
 def test_paired_execution_reuses_randomness_for_a_no_op_intervention() -> None:
     inputs, outputs = _schemas()
     batch = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
     policy = TensorDictModule(torch.nn.Dropout(p=0.5), in_keys=["observation"], out_keys=["action"])
-    descriptor = _descriptor(InteractionPhase.EVALUATION, inputs, outputs)
+    contract = _contract(InteractionPhase.EVALUATION, inputs, outputs)
     no_op = Intervention(
         "control",
         InterventionTarget.TENSORDICT,
@@ -366,10 +376,8 @@ def test_paired_execution_reuses_randomness_for_a_no_op_intervention() -> None:
         transform=lambda value: value.clone(),
         key="action",
     )
-    baseline = RuntimeInteractionContext(descriptor, policy, inputs, outputs, batch)
-    control = RuntimeInteractionContext(
-        descriptor, policy, inputs, outputs, batch, interventions=InterventionController((no_op,))
-    )
+    baseline = RuntimeInteractionContext(contract, policy, batch)
+    control = RuntimeInteractionContext(contract, policy, batch, interventions=InterventionController((no_op,)))
 
     torch.manual_seed(7)
     result = run_paired(baseline, control, batch)
@@ -388,10 +396,8 @@ def test_invalid_tensordict_interventions_fail_at_the_contract_boundary() -> Non
         key="observation",
     )
     context = RuntimeInteractionContext(
-        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+        _contract(InteractionPhase.EVALUATION, inputs, outputs),
         _policy(),
-        inputs,
-        outputs,
         batch,
         interventions=InterventionController((invalid,)),
     )
@@ -401,10 +407,8 @@ def test_invalid_tensordict_interventions_fail_at_the_contract_boundary() -> Non
 
     with pytest.raises(InterventionValidationError, match="declared required key"):
         RuntimeInteractionContext(
-            _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+            _contract(InteractionPhase.EVALUATION, inputs, outputs),
             _policy(),
-            inputs,
-            outputs,
             batch,
             interventions=InterventionController(
                 (
@@ -432,10 +436,8 @@ def test_input_observations_capture_the_intervened_value() -> None:
     )
     trace = ObservationTrace(RetentionPolicy(tensor=TensorRetention.DETACHED))
     context = RuntimeInteractionContext(
-        _descriptor(InteractionPhase.EVALUATION, inputs, outputs),
+        _contract(InteractionPhase.EVALUATION, inputs, outputs),
         _policy(),
-        inputs,
-        outputs,
         batch,
         observations=trace,
         interventions=InterventionController((intervention,)),

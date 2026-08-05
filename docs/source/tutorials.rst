@@ -5,9 +5,9 @@ TorchRL execution boundaries
 -----------------------------
 
 Build one ``RuntimeInteractionContext`` for each semantic model invocation.
-The descriptor distinguishes collection, evaluation, loss, and target calls;
+The contract distinguishes collection, evaluation, loss, and target calls;
 the live TensorDict remains owned by TorchRL. Assuming ``collection`` is a
-context whose descriptor has phase ``COLLECTION``, direct execution is simply::
+context whose contract has phase ``COLLECTION``, direct execution is simply::
 
     action_td = collection(step_td)
 
@@ -28,7 +28,7 @@ collector. XDRL neither changes the returned keys nor controls batching::
 Do not use this pattern with a collector that copies the policy into workers.
 Hooks registered in the main process are not claimed to exist in those copies.
 
-For deterministic evaluation, use a distinct descriptor with
+For deterministic evaluation, use a distinct contract with
 ``phase=InteractionPhase.EVALUATION``, ``exploration_mode="deterministic"``,
 and ``module_training=False``. Both exploration state and the exact train/eval
 flags of the module tree are restored after every call, including failures::
@@ -42,7 +42,7 @@ only need the forward pass, the one-shot form is sufficient::
     loss_td = replay_loss(replay_buffer.sample())
 
 When gradient hooks must observe backward, keep the interaction open until
-backward completes. The descriptor should use ``phase=InteractionPhase.LOSS``
+backward completes. The contract should use ``phase=InteractionPhase.LOSS``
 or ``OPTIMISATION`` and ``gradient_enabled=True``::
 
     optimiser.zero_grad()
@@ -51,6 +51,6 @@ or ``OPTIMISATION`` and ``gradient_enabled=True``::
         loss_td["loss_objective"].backward()
     optimiser.step()
 
-Target/value estimation should use its own ``TARGET`` descriptor and identity,
+Target/value estimation should use its own ``TARGET`` contract and identity,
 even when it invokes a module with shared parameters. Logging, checkpointing,
 replay sampling, and optimiser scheduling stay outside the interaction.

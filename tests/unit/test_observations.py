@@ -4,7 +4,7 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from xdrl.interactions import InteractionDescriptor, InteractionPhase, RuntimeInteractionContext, SchemaSnapshot
+from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 from xdrl.observations import (
     DimensionReduction,
     HookDirection,
@@ -40,17 +40,16 @@ class _Policy(torch.nn.Module):
         )
 
 
-def _descriptor(inputs: TensorDictSchema, outputs: TensorDictSchema) -> InteractionDescriptor:
-    return InteractionDescriptor(
+def _contract(inputs: TensorDictSchema, outputs: TensorDictSchema) -> InteractionContract:
+    return InteractionContract(
         "trajectory:4:policy",
         ModelRole.ACTOR,
         InteractionPhase.COLLECTION,
         "policy",
-        SchemaSnapshot.from_schema(inputs),
-        SchemaSnapshot.from_schema(outputs),
+        inputs,
+        outputs,
         model_id="policy-v2",
         checkpoint_id="checkpoint-4",
-        batch_dimensions=("env",),
         time_dimension="time",
         agent_dimension="agent",
         logical_step=4,
@@ -65,9 +64,7 @@ def test_trace_is_serialisable_and_observation_only_preserves_model_output() -> 
     model = _Policy()
     expected = model(batch.clone())
     trace = ObservationTrace()
-    context = RuntimeInteractionContext(
-        _descriptor(inputs, outputs), model, inputs, outputs, batch, observations=trace
-    )
+    context = RuntimeInteractionContext(_contract(inputs, outputs), model, batch, observations=trace)
 
     with context:
         actual = context.invoke(batch.clone())
@@ -95,10 +92,10 @@ def test_retention_detaches_reduces_and_bounds_records() -> None:
             max_records=1,
         )
     )
-    descriptor = _descriptor(inputs, outputs)
+    contract = _contract(inputs, outputs)
     source = torch.tensor([[1.0, 3.0], [5.0, 7.0]], requires_grad=True)
     first = trace.observe_tensor(
-        descriptor,
+        contract,
         source,
         kind=ObservationKind.ACTIVATION,
         target="encoder",
@@ -110,16 +107,14 @@ def test_retention_detaches_reduces_and_bounds_records() -> None:
     assert first.payload.device.type == "cpu"
     assert first.retained_batch_dimensions == ()
     assert torch.equal(first.payload, torch.tensor([3.0, 5.0]))
-    trace.observe_tensor(
-        descriptor, source, kind=ObservationKind.GRADIENT, target="encoder", batch_dimensions=("env",)
-    )
+    trace.observe_tensor(contract, source, kind=ObservationKind.GRADIENT, target="encoder", batch_dimensions=("env",))
     assert len(trace.records) == 1
     assert trace.dropped == 1
 
 
 def test_max_reduction_and_unbatched_hook_tensors_are_handled_explicitly() -> None:
     inputs, outputs = _schemas()
-    descriptor = _descriptor(inputs, outputs)
+    contract = _contract(inputs, outputs)
     trace = ObservationTrace(
         RetentionPolicy(
             tensor=TensorRetention.DETACHED,
@@ -127,14 +122,14 @@ def test_max_reduction_and_unbatched_hook_tensors_are_handled_explicitly() -> No
         )
     )
     reduced = trace.observe_tensor(
-        descriptor,
+        contract,
         torch.tensor([[1.0, 5.0], [4.0, 3.0]]),
         kind=ObservationKind.ACTIVATION,
         target="encoder",
         batch_dimensions=("env",),
     )
     unbatched = trace.observe_tensor(
-        descriptor, torch.tensor([1.0, 5.0]), kind=ObservationKind.GRADIENT, target="encoder"
+        contract, torch.tensor([1.0, 5.0]), kind=ObservationKind.GRADIENT, target="encoder"
     )
     assert reduced is not None and torch.equal(reduced.payload, torch.tensor([4.0, 5.0]))
     assert reduced.retained_batch_dimensions == ()
@@ -153,7 +148,7 @@ def test_agent_and_time_reductions_are_named_serialised_and_opt_in() -> None:
     trace = ObservationTrace(policy)
     inputs, outputs = _schemas()
     record = trace.observe_tensor(
-        _descriptor(inputs, outputs),
+        _contract(inputs, outputs),
         torch.arange(24, dtype=torch.float).reshape(2, 3, 4, 1),
         kind=ObservationKind.ACTIVATION,
         target="shared_encoder",
@@ -181,7 +176,7 @@ def test_reduction_rejects_an_unnamed_batch_axis() -> None:
 
     with pytest.raises(ValueError, match="agent.*not present"):
         trace.observe_tensor(
-            _descriptor(inputs, outputs),
+            _contract(inputs, outputs),
             torch.zeros(2, 3),
             kind=ObservationKind.ACTIVATION,
             target="encoder",
@@ -207,12 +202,12 @@ def test_reduction_policy_rejects_invalid_dimensions_and_limits() -> None:
 
 def test_composite_schema_parent_captures_nested_tensor_leaves() -> None:
     inputs, outputs = _schemas()
-    descriptor = _descriptor(inputs, outputs)
+    contract = _contract(inputs, outputs)
     trace = ObservationTrace()
     batch = TensorDict({"agents": TensorDict({"observation": torch.zeros(2, 3)}, batch_size=[2])}, batch_size=[2])
 
     records = trace.capture_tensordict(
-        descriptor,
+        contract,
         batch,
         direction=HookDirection.INPUT,
         roles={("agents",): KeyRole.OBSERVATION},
@@ -226,7 +221,7 @@ def test_composite_schema_parent_captures_nested_tensor_leaves() -> None:
 def test_observation_serialisation_does_not_include_retained_payload() -> None:
     inputs, outputs = _schemas()
     record = ObservationTrace(RetentionPolicy(tensor=TensorRetention.DETACHED)).observe_tensor(
-        _descriptor(inputs, outputs), torch.ones(1), kind=ObservationKind.ACTIVATION, target="encoder"
+        _contract(inputs, outputs), torch.ones(1), kind=ObservationKind.ACTIVATION, target="encoder"
     )
     assert record is not None and record.payload is not None
     assert "payload" not in record.to_dict()
@@ -239,9 +234,9 @@ def test_sampling_streaming_and_backpressure_are_explicit() -> None:
     trace = ObservationTrace(
         RetentionPolicy(every_n=2, max_records=1, overflow=OverflowPolicy.DROP_NEWEST), callback=streamed.append
     )
-    descriptor = _descriptor(inputs, outputs)
+    contract = _contract(inputs, outputs)
     for _ in range(3):
-        trace.observe_tensor(descriptor, torch.zeros(1), kind=ObservationKind.TENSORDICT_KEY, target="obs")
+        trace.observe_tensor(contract, torch.zeros(1), kind=ObservationKind.TENSORDICT_KEY, target="obs")
     assert len(trace.records) == 1
     assert len(streamed) == 2
     assert trace.dropped == 1

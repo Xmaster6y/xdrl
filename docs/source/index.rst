@@ -13,6 +13,7 @@
     tutorials
     architecture
     compatibility
+    migration
     news-retirement
     api/index
     About <about>

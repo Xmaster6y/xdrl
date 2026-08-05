@@ -1,7 +1,6 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from xdrl.compatibility import (
-    ADAPTER_CONFORMANCE,
     PRIVATE_UPSTREAM_APIS,
     SUPPORT_DEFINITIONS,
     SUPPORTED_DEPENDENCIES,
@@ -14,21 +13,23 @@ from xdrl.compatibility import (
     PrivateAPIUsage,
     SupportLevel,
     VersionRequirement,
+    WORKFLOW_CONFORMANCE,
     installed_dependency_revisions,
     installed_dependency_versions,
     validate_runtime_compatibility,
 )
 from xdrl.interactions import (
     AgentSelector,
-    InteractionDescriptor,
+    InteractionContract,
     InteractionPhase,
     InteractionTopology,
+    LifecycleEvent,
+    LifecycleEventType,
     MultiAgentSemantics,
     RecurrentCollectorMode,
     RecurrentSemantics,
     RecurrentStateTransition,
     RuntimeInteractionContext,
-    SchemaSnapshot,
     SemanticTarget,
 )
 from xdrl.interventions import (
@@ -40,7 +41,6 @@ from xdrl.interventions import (
     InterventionTiming,
     InterventionValidationError,
     PairedInterventionResult,
-    TDHookInterventionFactory,
     run_paired,
 )
 from xdrl.observations import (
@@ -52,15 +52,27 @@ from xdrl.observations import (
     RetentionPolicy,
     TensorRetention,
 )
-from xdrl.provenance import PROVENANCE_SCHEMA_REVISION, ProvenanceManifest, ProvenanceSchemaError
-from xdrl.tdhook import TDHookInteractionAdapter, TDHookPipelineResult
+from xdrl.provenance import (
+    WORKFLOW_PROVENANCE_SCHEMA_REVISION,
+    ProvenanceSchemaError,
+    WorkflowCompatibilityEvidence,
+    WorkflowExecutionEvidence,
+    WorkflowPlanEvidence,
+    WorkflowProvenance,
+)
+from xdrl.tdhook import TDHookWorkflowResult, TDHookWorkflowRunner
 from xdrl.types import (
     BatchSemantics,
+    ContractModule,
     KeyPresence,
     KeyRole,
     KeySchema,
     ModelRole,
+    SchemaValidationError,
+    TensorDictKey,
     TensorDictSchema,
+    TorchRLModule,
+    validate_module,
 )
 
 try:
@@ -69,14 +81,14 @@ except PackageNotFoundError:
     __version__ = "unknown version"
 
 __all__ = [
-    "ADAPTER_CONFORMANCE",
     "AgentSelector",
     "BatchSemantics",
     "CompatibilityBoundaryError",
     "ConformanceCheck",
     "ConformanceSuite",
+    "ContractModule",
     "GitRevisionRequirement",
-    "InteractionDescriptor",
+    "InteractionContract",
     "InteractionPhase",
     "InteractionTopology",
     "Intervention",
@@ -89,6 +101,8 @@ __all__ = [
     "KeyPresence",
     "KeyRole",
     "KeySchema",
+    "LifecycleEvent",
+    "LifecycleEventType",
     "MultiAgentSemantics",
     "ModelRole",
     "ObservationKind",
@@ -96,8 +110,6 @@ __all__ = [
     "ObservationTrace",
     "PRIVATE_UPSTREAM_APIS",
     "PrivateAPIUsage",
-    "PROVENANCE_SCHEMA_REVISION",
-    "ProvenanceManifest",
     "ProvenanceSchemaError",
     "DimensionReduction",
     "ReductionKind",
@@ -106,7 +118,7 @@ __all__ = [
     "RecurrentStateTransition",
     "RetentionPolicy",
     "RuntimeInteractionContext",
-    "SchemaSnapshot",
+    "SchemaValidationError",
     "SemanticTarget",
     "SUPPORTED_DEPENDENCIES",
     "SUPPORTED_GIT_REVISIONS",
@@ -114,14 +126,22 @@ __all__ = [
     "SUPPORT_DEFINITIONS",
     "SupportLevel",
     "PairedInterventionResult",
-    "TDHookInteractionAdapter",
-    "TDHookPipelineResult",
-    "TDHookInterventionFactory",
+    "TDHookWorkflowResult",
+    "TDHookWorkflowRunner",
     "TensorDictSchema",
+    "TensorDictKey",
     "TensorRetention",
+    "TorchRLModule",
     "VersionRequirement",
+    "WORKFLOW_PROVENANCE_SCHEMA_REVISION",
+    "WorkflowCompatibilityEvidence",
+    "WorkflowExecutionEvidence",
+    "WorkflowPlanEvidence",
+    "WorkflowProvenance",
+    "WORKFLOW_CONFORMANCE",
     "installed_dependency_revisions",
     "installed_dependency_versions",
     "run_paired",
+    "validate_module",
     "validate_runtime_compatibility",
 ]

@@ -43,10 +43,12 @@ Interaction contexts
 
 ``xdrl.interactions`` records an individual invocation of a TensorDict module
 without changing TorchRL's collector or trainer loops. An
-``InteractionDescriptor`` is the durable, serialisable record: it identifies
-the role, phase, module path, declared I/O schemas, batch semantics,
+``InteractionContract`` is the immutable live declaration: it identifies the
+role, phase, module path, native I/O schemas and specs, batch semantics,
 exploration/gradient/autocast configuration, and any supplied logical
-step/episode/trajectory identifiers. It contains neither tensors nor modules.
+step/episode/trajectory identifiers. It does not own a live model or execution
+TensorDict. Its ``to_dict()`` projection is the durable tensor-free record used
+by workflow provenance.
 ``module_training`` optionally requests train or evaluation mode for the live
 call; the exact pre-existing mode of every submodule is restored afterwards.
 
@@ -77,7 +79,7 @@ collector, rollout, replay buffer, optimiser, or trainer schedule.
    * - Direct call
      - Any
      - Caller input/output
-     - Descriptor-controlled
+     - Contract-controlled
      - One before/after or failure pair per call
    * - Synchronous collection
      - Actor
@@ -156,23 +158,32 @@ batch-dimension name (such as ``time`` or ``agent``) with a serialised
 callback supports streaming consumers. Probes and attribution remain external
 consumers of these records rather than becoming xdrl algorithms.
 
-TDHook instrumentation
-----------------------
+TDHook v0.2 workflows
+---------------------
 
-``TDHookInteractionAdapter`` binds one ``RuntimeInteractionContext`` to one or
-more raw TDHook context factories. It validates that the selected TensorDict
-input and output keys satisfy both the model and interaction contract, then
-executes through the existing context without changing TensorDict nesting,
-batch shape, dtype, device, or model mode. Semantic aliases in the interaction
-descriptor are exposed as stable TDHook target paths.
+``TDHookWorkflowRunner`` delegates composition, planning, coexecution,
+TensorDict artifacts, target resolution, and hook cleanup to TDHook's public
+``Workflow`` API. XDRL installs temporary public hooks on the original root
+TensorDict module so every actual model pass crosses the live RL input/output
+schema and execution-mode boundary without wrapping the model, changing its
+class, or shifting TDHook target paths.
 
-Lazy modules must be explicitly materialised with ``adapter.materialize()``
-before ``adapter.activate(factory)``. Compiled, distributed, and remote modules
-are rejected instead of being instrumented with ambiguous semantics.
+``runner.plan(workflow, data)`` returns TDHook's immutable ``WorkflowPlan``.
+``runner.run(...)`` requires the executing code revision and returns the native
+final TensorDict, exact TDHook plan, and versioned ``WorkflowProvenance``. The
+provenance snapshot contains the canonical interaction contract, public plan
+executions and compatibility decisions, lifecycle evidence, dependency
+versions, and an optional seed. The runner rejects plan drift, incompatible
+gradient requirements, and a disagreement between TDHook's declared model-pass
+count and the model calls XDRL actually observed. Lazy modules must be
+materialised explicitly. Compiled, distributed, and remote modules remain
+unsupported.
 
-Declared TDHook workflows use ``adapter.run_pipeline(pipeline, artifacts,
-code_revision=...)``. TDHook plans the workflow before execution and remains
-the owner of stage grouping, artifacts, pass counts, and hook cleanup. Every
-planned model call crosses the same live XDRL input/output schema and execution
-mode boundary, and the returned ``TDHookPipelineResult`` links TDHook's stage
-artifacts and plan to the interaction's model and checkpoint provenance.
+Captured provenance is deeply immutable: contract projections, dependency
+mappings, and lifecycle key-shape mappings cannot be changed after
+construction. Decoding validates the complete projected contract shape and
+requires one contiguous ``before``/``after`` pair per successful model pass.
+
+Interactive capture or replacement uses TDHook's ``HookSession`` directly
+inside an active XDRL interaction. XDRL does not implement a second hook,
+target, or intervention runtime.
