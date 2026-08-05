@@ -1,13 +1,8 @@
 Getting Started
 ===============
 
-``xdrl`` describes one TorchRL model interaction with native TensorDict keys,
-TorchRL specs, and explicit RL execution semantics. TDHook v0.2 owns configured
-methods, targets, hooks, workflows, planning, and TensorDict artifacts; XDRL
-validates every actual root model call made by that workflow.
-
-The following example is exercised by
-``tests/integration/test_quickstart.py``:
+XDRL keeps TensorDict data and TorchRL modules native. Define the inputs and
+outputs of one model call, then run a TDHook workflow through that interaction.
 
 .. code-block:: python
 
@@ -81,20 +76,6 @@ The following example is exercised by
    assert torch.equal(intervened["action"], torch.zeros(8, 2))
    assert not policy.module._forward_hooks
 
-What this guarantees
---------------------
-
-TDHook determines the workflow dependencies, compatibility groups, and pass
-count. XDRL keeps the original model identity and target paths, applies the RL
-execution policy, validates every root TensorDict model call, records its
-lifecycle, and rejects disagreement between planned and observed calls. Both
-libraries restore their temporary state after normal or exceptional exits.
-
-What remains external
----------------------
-
-TorchRL owns environments, collectors, replay, losses, and optimisation.
-TDHook owns model-internal methods and interactive target operations. The
-experiment owns the meaning of an intervention, scientific controls, scoring,
-and conclusions. Read :doc:`architecture` for recurrent and multi-agent
-contracts and :doc:`compatibility` before changing the locked dependencies.
+The runner returns TDHook artifacts and a provenance record. XDRL supports
+local, synchronous execution; do not use it for worker-copied, compiled,
+remote, or distributed modules.

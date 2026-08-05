@@ -1,13 +1,13 @@
 Tutorials
 =========
 
-TorchRL execution boundaries
------------------------------
+Use one ``RuntimeInteractionContext`` for each semantic model call. The
+TensorDict stays owned by TorchRL.
 
-Build one ``RuntimeInteractionContext`` for each semantic model invocation.
-The contract distinguishes collection, evaluation, loss, and target calls;
-the live TensorDict remains owned by TorchRL. Assuming ``collection`` is a
-context whose contract has phase ``COLLECTION``, direct execution is simply::
+Collection
+----------
+
+For local synchronous collection, pass the context directly as the policy::
 
     action_td = collection(step_td)
 
@@ -25,25 +25,23 @@ collector. XDRL neither changes the returned keys nor controls batching::
     for rollout in collector:
         replay_buffer.extend(rollout)
 
-Do not use this pattern with a collector that copies the policy into workers.
-Hooks registered in the main process are not claimed to exist in those copies.
+Evaluation
+----------
 
-For deterministic evaluation, use a distinct contract with
-``phase=InteractionPhase.EVALUATION``, ``exploration_mode="deterministic"``,
-and ``module_training=False``. Both exploration state and the exact train/eval
-flags of the module tree are restored after every call, including failures::
+Use a separate evaluation contract with deterministic exploration and
+``module_training=False``::
 
     with torch.no_grad():
         evaluation_rollout = env.rollout(1_000, policy=evaluation)
 
-A replay-batch loss module uses the same invocation API. If activation hooks
-only need the forward pass, the one-shot form is sufficient::
+Losses
+------
+
+Call a replay-batch loss context in the same way::
 
     loss_td = replay_loss(replay_buffer.sample())
 
-When gradient hooks must observe backward, keep the interaction open until
-backward completes. The contract should use ``phase=InteractionPhase.LOSS``
-or ``OPTIMISATION`` and ``gradient_enabled=True``::
+Keep the context open when hooks need to observe backward::
 
     optimiser.zero_grad()
     with replay_loss:
@@ -51,6 +49,5 @@ or ``OPTIMISATION`` and ``gradient_enabled=True``::
         loss_td["loss_objective"].backward()
     optimiser.step()
 
-Target/value estimation should use its own ``TARGET`` contract and identity,
-even when it invokes a module with shared parameters. Logging, checkpointing,
-replay sampling, and optimiser scheduling stay outside the interaction.
+Use a distinct ``TARGET`` contract for target/value estimation. Worker-copied,
+asynchronous, and distributed collector policies are not supported.
