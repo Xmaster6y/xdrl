@@ -1,3 +1,6 @@
+from dataclasses import replace
+from types import SimpleNamespace
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -110,6 +113,23 @@ class _ExtraCallWorkflow(Workflow):
         return result
 
 
+class _MissingPublicEvidenceWorkflow(Workflow):
+    @property
+    def describe(self):  # type: ignore[no-untyped-def]
+        raise AttributeError("describe")
+
+
+class _InvalidPublicEvidenceWorkflow(Workflow):
+    def run_with_plan(self, model: torch.nn.Module, data: TensorDict):  # type: ignore[no-untyped-def]
+        return SimpleNamespace(data=object(), plan=super().plan(model, data))
+
+
+class _DriftingPlanWorkflow(Workflow):
+    def run_with_plan(self, model: torch.nn.Module, data: TensorDict):  # type: ignore[no-untyped-def]
+        execution = super().run_with_plan(model, data)
+        return replace(execution, plan=replace(execution.plan, executions=()))
+
+
 @pytest.mark.integration
 def test_planned_and_observed_model_passes_must_match() -> None:
     interaction, _ = _interaction()
@@ -146,6 +166,42 @@ def test_runner_rejects_tdhook_without_public_execution_evidence() -> None:
     with pytest.raises(RuntimeError, match="public execution evidence"):
         TDHookWorkflowRunner(interaction).run(
             workflow, interaction.representative_input.clone(), code_revision="test-revision"
+        )
+
+
+@pytest.mark.integration
+def test_runner_rejects_tdhook_with_missing_public_execution_evidence() -> None:
+    interaction, _ = _interaction()
+
+    with pytest.raises(RuntimeError, match="public execution evidence"):
+        TDHookWorkflowRunner(interaction).run(
+            _MissingPublicEvidenceWorkflow(ActivationCaching("module")),
+            interaction.representative_input.clone(),
+            code_revision="test-revision",
+        )
+
+
+@pytest.mark.integration
+def test_runner_rejects_invalid_public_execution_evidence() -> None:
+    interaction, _ = _interaction()
+
+    with pytest.raises(TypeError, match="invalid public evidence"):
+        TDHookWorkflowRunner(interaction).run(
+            _InvalidPublicEvidenceWorkflow(ActivationCaching("module")),
+            interaction.representative_input.clone(),
+            code_revision="test-revision",
+        )
+
+
+@pytest.mark.integration
+def test_runner_rejects_public_execution_plan_drift() -> None:
+    interaction, _ = _interaction()
+
+    with pytest.raises(RuntimeError, match="plan changed during execution"):
+        TDHookWorkflowRunner(interaction).run(
+            _DriftingPlanWorkflow(ActivationCaching("module")),
+            interaction.representative_input.clone(),
+            code_revision="test-revision",
         )
 
 

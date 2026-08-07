@@ -11,7 +11,7 @@ from tdhook.workflow import Workflow, WorkflowPlan
 
 from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 from xdrl.provenance import ProvenanceSchemaError
-from xdrl.tdhook import TDHookWorkflowRunner
+from xdrl.tdhook import TDHookWorkflowRunner, _configured_step_description
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
 
@@ -91,6 +91,18 @@ def test_runner_rejects_compiled_descendants() -> None:
     interaction.module.module._orig_mod = interaction.module.module
     with pytest.raises(NotImplementedError, match="torch.compile"):
         TDHookWorkflowRunner(interaction)
+
+
+def test_configured_step_descriptions_must_be_serializable_public_data() -> None:
+    with pytest.raises(TypeError, match="expose to_dict"):
+        _configured_step_description(object())
+
+    class _NonSerializableDescription:
+        def to_dict(self) -> object:
+            return {"callback": object()}
+
+    with pytest.raises(TypeError, match="must be JSON-compatible"):
+        _configured_step_description(_NonSerializableDescription())
 
 
 class _RequiredGradientCaching(ActivationCaching):

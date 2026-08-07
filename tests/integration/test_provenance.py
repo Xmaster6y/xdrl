@@ -99,6 +99,12 @@ def test_workflow_provenance_rejects_tuple_configured_steps_when_decoding() -> N
 
 
 @pytest.mark.integration
+def test_workflow_provenance_rejects_invalid_in_memory_configured_steps() -> None:
+    with pytest.raises(ProvenanceSchemaError, match="configured_steps must be an array"):
+        replace(_run(), configured_steps=object())
+
+
+@pytest.mark.integration
 def test_workflow_provenance_is_deeply_immutable_and_returns_detached_payloads() -> None:
     provenance = _run()
     contract = provenance.interaction_contract
