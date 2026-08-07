@@ -1,4 +1,5 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -105,10 +106,12 @@ def test_workflow_gradient_requirements_must_match_the_rl_interaction() -> None:
         runner.run(workflow, runner.interaction.representative_input.clone(), code_revision="test-revision")
 
 
-class _InternalBackwardCaching(ActivationCaching):
-    @property
-    def execution_spec(self) -> ExecutionSpec:
-        return ExecutionSpec(gradient_mode=GradientMode.REQUIRED)
+def test_gradient_required_execution_without_a_lifetime_declaration_is_rejected() -> None:
+    runner = TDHookWorkflowRunner(_interaction())
+    plan = SimpleNamespace(executions=(SimpleNamespace(gradient_mode=GradientMode.REQUIRED),))
+
+    with pytest.raises(ValueError, match="autograd lifetime declaration"):
+        runner._validate_gradient_contract(plan)  # type: ignore[arg-type]
 
 
 class _DeferredBackwardCaching(ActivationCaching):
@@ -130,7 +133,7 @@ def test_gradient_required_call_lifetime_workflow_runs_when_xdrl_owns_enabled_gr
     runner = TDHookWorkflowRunner(interaction)
 
     execution = runner.run(
-        _InternalBackwardWorkflow(_InternalBackwardCaching("module")),
+        _InternalBackwardWorkflow(_RequiredGradientCaching("module")),
         interaction.representative_input.clone(),
         code_revision="test-revision",
     )
@@ -145,7 +148,7 @@ def test_gradient_required_call_lifetime_workflow_requires_enabled_gradients() -
 
     with pytest.raises(ValueError, match="requires gradient_enabled=True"):
         runner.run(
-            _InternalBackwardWorkflow(_InternalBackwardCaching("module")),
+            _InternalBackwardWorkflow(_RequiredGradientCaching("module")),
             runner.interaction.representative_input.clone(),
             code_revision="test-revision",
         )
@@ -160,7 +163,7 @@ def test_gradient_required_call_lifetime_workflow_rejects_inference_mode() -> No
 
     with pytest.raises(ValueError, match="incompatible with inference_mode=True"):
         runner.run(
-            _InternalBackwardWorkflow(_InternalBackwardCaching("module")),
+            _InternalBackwardWorkflow(_RequiredGradientCaching("module")),
             runner.interaction.representative_input.clone(),
             code_revision="test-revision",
         )

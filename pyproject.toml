@@ -11,7 +11,7 @@ authors = [
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "packaging>=21.0",
-    "tdhook>=0.2,<0.3",
+    "tdhook @ git+https://github.com/Xmaster6y/tdhook@ea51fe37094d19ddbdacb5db685583a5d1b88b3a",
     "tensordict>=0.13,<0.14",
     "torch>=2.11",
     "torchrl>=0.13,<0.14",
