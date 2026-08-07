@@ -90,6 +90,15 @@ def test_workflow_provenance_uses_the_optional_seed_default_when_decoding() -> N
 
 
 @pytest.mark.integration
+def test_workflow_provenance_rejects_tuple_configured_steps_when_decoding() -> None:
+    payload = _run().to_dict()
+    payload["configured_steps"] = ("not JSON",)
+
+    with pytest.raises(ProvenanceSchemaError, match="configured_steps must be an array"):
+        WorkflowProvenance.from_dict(payload)
+
+
+@pytest.mark.integration
 def test_workflow_provenance_is_deeply_immutable_and_returns_detached_payloads() -> None:
     provenance = _run()
     contract = provenance.interaction_contract

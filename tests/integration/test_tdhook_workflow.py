@@ -1,11 +1,9 @@
-from dataclasses import dataclass
-
 import pytest
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from tdhook.latent import ActivationCaching
-from tdhook.workflow import Workflow, WorkflowPlan
+from tdhook.workflow import Workflow
 
 from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 from xdrl.tdhook import TDHookWorkflowRunner
@@ -106,9 +104,9 @@ def test_workflow_preserves_root_module_type_and_state() -> None:
 
 
 class _ExtraCallWorkflow(Workflow):
-    def run(self, model: torch.nn.Module, data: TensorDict) -> TensorDict:
-        result = super().run(model, data)
-        model(result)
+    def run_with_plan(self, model: torch.nn.Module, data: TensorDict):  # type: ignore[no-untyped-def]
+        result = super().run_with_plan(model, data)
+        model(result.data)
         return result
 
 
@@ -125,37 +123,10 @@ def test_planned_and_observed_model_passes_must_match() -> None:
     assert not interaction.module._forward_hooks
 
 
-@dataclass(frozen=True)
-class _PublicExecutionEvidence:
-    data: TensorDict
-    plan: WorkflowPlan
-    configured_steps: tuple[str, ...]
-
-
-class _EvidenceWorkflow(Workflow):
-    def run_with_evidence(self, model: torch.nn.Module, data: TensorDict) -> _PublicExecutionEvidence:
-        plan = self.plan(model, data)
-        result = super().run(model, data)
-        return _PublicExecutionEvidence(result, plan, ("ActivationCaching(module, activations/head)",))
-
-
 @pytest.mark.integration
 def test_runner_consumes_public_execution_plan_and_configured_step_descriptions() -> None:
     interaction, _ = _interaction()
-    workflow = _EvidenceWorkflow(ActivationCaching("module", cache_key=("activations", "head")))
-
-    execution = TDHookWorkflowRunner(interaction).run(
-        workflow, interaction.representative_input.clone(), code_revision="test-revision"
-    )
-
-    assert execution.plan == workflow.plan(interaction.module, interaction.representative_input.clone())
-    assert execution.provenance.configured_steps == ("ActivationCaching(module, activations/head)",)
-
-
-@pytest.mark.integration
-def test_runner_captures_the_exact_plan_built_inside_workflow_run() -> None:
-    interaction, _ = _interaction()
-    workflow = Workflow(ActivationCaching("module"))
+    workflow = Workflow(ActivationCaching("module", cache_key=("activations", "head")))
 
     execution = TDHookWorkflowRunner(interaction).run(
         workflow, interaction.representative_input.clone(), code_revision="test-revision"
@@ -163,6 +134,19 @@ def test_runner_captures_the_exact_plan_built_inside_workflow_run() -> None:
 
     assert execution.plan == workflow.plan(interaction.module, interaction.representative_input.clone())
     assert execution.provenance.configured_steps
+    assert "cache_key" in execution.provenance.configured_steps[0]
+
+
+@pytest.mark.integration
+def test_runner_rejects_tdhook_without_public_execution_evidence() -> None:
+    interaction, _ = _interaction()
+    workflow = Workflow(ActivationCaching("module"))
+    workflow.run_with_plan = None  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="public execution evidence"):
+        TDHookWorkflowRunner(interaction).run(
+            workflow, interaction.representative_input.clone(), code_revision="test-revision"
+        )
 
 
 @pytest.mark.integration

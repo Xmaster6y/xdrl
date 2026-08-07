@@ -127,7 +127,7 @@ class WorkflowProvenance:
         if self.seed is not None and type(self.seed) is not int:
             raise ProvenanceSchemaError("seed must be an integer or null")
         dependencies = _validate_dependencies(self.dependencies)
-        configured_steps = _configured_steps(self.configured_steps)
+        configured_steps = _configured_step_sequence(self.configured_steps)
         if any(event.interaction_id != interaction_id for event in self.lifecycle_events):
             raise ProvenanceSchemaError("lifecycle events must belong to the interaction contract")
         if self.model_calls != self.workflow_plan.model_passes:
@@ -181,7 +181,7 @@ class WorkflowProvenance:
             schema_revision=WORKFLOW_PROVENANCE_SCHEMA_REVISION,
             interaction_contract=_json_copy(contract.to_dict(), "interaction_contract"),
             workflow_plan=WorkflowPlanEvidence.from_plan(plan),
-            configured_steps=_configured_steps(configured_steps),
+            configured_steps=_configured_step_sequence(configured_steps),
             lifecycle_events=events,
             dependencies=validated_dependencies,
             code_revision=code_revision,
@@ -710,6 +710,13 @@ def _strings(value: Any, field: str) -> tuple[str, ...]:
 
 def _configured_steps(value: Any) -> tuple[str, ...]:
     """Validate TDHook's ordered, result-affecting step descriptions."""
+    if not isinstance(value, list):
+        raise ProvenanceSchemaError("configured_steps must be an array")
+    return _configured_step_sequence(value)
+
+
+def _configured_step_sequence(value: Any) -> tuple[str, ...]:
+    """Normalize already-constructed configured-step descriptions."""
     if not isinstance(value, (list, tuple)):
         raise ProvenanceSchemaError("configured_steps must be an array")
     return tuple(_nonempty_string(item, f"configured_steps[{index}]") for index, item in enumerate(value))

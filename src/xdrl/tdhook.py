@@ -76,28 +76,28 @@ class TDHookWorkflowRunner:
             raise RuntimeError("TDHook workflow plan changed after caller preflight")
         self._validate_gradient_contract(preflight_plan)
         self._reject_interaction_module_operators(workflow)
+        try:
+            describe = workflow.describe
+            run_with_plan = workflow.run_with_plan
+        except AttributeError as error:
+            raise RuntimeError(
+                "TDHookWorkflowRunner requires TDHook public execution evidence; install the supported TDHook revision"
+            ) from error
+        if not callable(describe) or not callable(run_with_plan):
+            raise RuntimeError(
+                "TDHookWorkflowRunner requires TDHook public execution evidence; install the supported TDHook revision"
+            )
+        configured_steps = tuple(
+            _configured_step_description(description) for description in describe(self.interaction.module, data)
+        )
         event_start = len(self.interaction.events)
         with self.interaction, self.interaction.observe_module_calls():
-            execute = getattr(workflow, "run_with_evidence", workflow.run)
-            execution = execute(self.interaction.module, data)
-        if isinstance(execution, TensorDictBase):
-            # TDHook 0.2.0 compatibility.  This uses only public surfaces and
-            # fails closed if a second public plan no longer agrees.
-            result = execution
-            plan = workflow.plan(self.interaction.module, data)
-            configured_steps = tuple(
-                f"{index}:{type(item.step if isinstance(item, WorkflowUpdate) else item).__name__}"
-                for index, item in enumerate(workflow.steps)
-            )
-            if plan != preflight_plan:
-                raise RuntimeError("TDHook workflow plan changed during execution")
-        else:
-            result = execution.data
-            plan = execution.plan
-            configured_steps = execution.configured_steps
-            if not isinstance(result, TensorDictBase) or not isinstance(plan, WorkflowPlan):
-                raise TypeError("TDHook workflow execution returned invalid public evidence")
-        if expected_plan is not None and plan != expected_plan:
+            execution = run_with_plan(self.interaction.module, data)
+        result = execution.data
+        plan = execution.plan
+        if not isinstance(result, TensorDictBase) or not isinstance(plan, WorkflowPlan):
+            raise TypeError("TDHook workflow execution returned invalid public evidence")
+        if plan != preflight_plan:
             raise RuntimeError("TDHook workflow plan changed during execution")
         events = tuple(self.interaction.events[event_start:])
         model_calls = sum(event.kind is LifecycleEventType.AFTER for event in events)
@@ -150,6 +150,19 @@ class TDHookWorkflowRunner:
 def _has_uninitialized_parameters(module: torch.nn.Module) -> bool:
     uninitialized = (torch.nn.parameter.UninitializedParameter, torch.nn.parameter.UninitializedBuffer)
     return any(isinstance(value, uninitialized) for value in (*module.parameters(), *module.buffers()))
+
+
+def _configured_step_description(description: object) -> str:
+    """Serialize one TDHook public configured-step description deterministically."""
+    to_dict = getattr(description, "to_dict", None)
+    if not callable(to_dict):
+        raise TypeError("TDHook configured-step descriptions must expose to_dict()")
+    import json
+
+    try:
+        return json.dumps(to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise TypeError("TDHook configured-step description must be JSON-compatible") from error
 
 
 def _reject_unsupported_module(module: torch.nn.Module) -> None:
