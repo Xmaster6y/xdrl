@@ -75,6 +75,7 @@ def test_workflow_provenance_round_trip_covers_verified_execution_boundary() -> 
     assert restored.interaction_contract["checkpoint_id"] == "sha256:abc"
     assert restored.workflow_plan.model_passes == restored.model_calls == 1
     assert restored.workflow_plan.executions[0].steps == ("0:ActivationCaching",)
+    assert restored.configured_steps
     assert restored.seed == 17
 
 
@@ -86,6 +87,21 @@ def test_workflow_provenance_uses_the_optional_seed_default_when_decoding() -> N
     restored = WorkflowProvenance.from_dict(payload)
 
     assert restored.seed is None
+
+
+@pytest.mark.integration
+def test_workflow_provenance_rejects_tuple_configured_steps_when_decoding() -> None:
+    payload = _run().to_dict()
+    payload["configured_steps"] = ("not JSON",)
+
+    with pytest.raises(ProvenanceSchemaError, match="configured_steps must be an array"):
+        WorkflowProvenance.from_dict(payload)
+
+
+@pytest.mark.integration
+def test_workflow_provenance_rejects_invalid_in_memory_configured_steps() -> None:
+    with pytest.raises(ProvenanceSchemaError, match="configured_steps must be an array"):
+        replace(_run(), configured_steps=object())
 
 
 @pytest.mark.integration
@@ -140,6 +156,7 @@ def test_workflow_provenance_rejects_plan_to_event_disagreement() -> None:
         ("code_revision", "", "code_revision must be a non-empty string"),
         ("dependencies", {**_dependencies(), "torch": ""}, "dependencies.torch must be a non-empty string"),
         ("dependencies", {**_dependencies(), "torch": "bad"}, "dependencies.torch must be a valid version"),
+        ("configured_steps", [""], "configured_steps[0] must be a non-empty string"),
         ("interaction_contract", [], "interaction_contract must be an object"),
     ],
 )

@@ -11,7 +11,7 @@ from tdhook.workflow import Workflow, WorkflowPlan
 
 from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 from xdrl.provenance import ProvenanceSchemaError
-from xdrl.tdhook import TDHookWorkflowRunner
+from xdrl.tdhook import TDHookWorkflowRunner, _configured_step_description
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
 
@@ -93,6 +93,18 @@ def test_runner_rejects_compiled_descendants() -> None:
         TDHookWorkflowRunner(interaction)
 
 
+def test_configured_step_descriptions_must_be_serializable_public_data() -> None:
+    with pytest.raises(TypeError, match="expose to_dict"):
+        _configured_step_description(object())
+
+    class _NonSerializableDescription:
+        def to_dict(self) -> object:
+            return {"callback": object()}
+
+    with pytest.raises(TypeError, match="must be JSON-compatible"):
+        _configured_step_description(_NonSerializableDescription())
+
+
 class _RequiredGradientCaching(ActivationCaching):
     @property
     def execution_spec(self) -> ExecutionSpec:
@@ -121,9 +133,9 @@ class _DeferredBackwardCaching(ActivationCaching):
 
 
 class _InternalBackwardWorkflow(Workflow):
-    def run(self, model: torch.nn.Module, data: TensorDict) -> TensorDict:
-        result = super().run(model, data)
-        result.get(("agents", "action")).sum().backward()
+    def run_with_plan(self, model: torch.nn.Module, data: TensorDict):  # type: ignore[no-untyped-def]
+        result = super().run_with_plan(model, data)
+        result.data.get(("agents", "action")).sum().backward()
         return result
 
 

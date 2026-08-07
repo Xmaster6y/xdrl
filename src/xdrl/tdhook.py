@@ -9,9 +9,7 @@ plan-to-call-count evidence around every actual root model call.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Iterator
 
 import torch
 from tensordict import TensorDictBase
@@ -78,14 +76,28 @@ class TDHookWorkflowRunner:
             raise RuntimeError("TDHook workflow plan changed after caller preflight")
         self._validate_gradient_contract(preflight_plan)
         self._reject_interaction_module_operators(workflow)
+        try:
+            describe = workflow.describe
+            run_with_plan = workflow.run_with_plan
+        except AttributeError as error:
+            raise RuntimeError(
+                "TDHookWorkflowRunner requires TDHook public execution evidence; install the supported TDHook revision"
+            ) from error
+        if not callable(describe) or not callable(run_with_plan):
+            raise RuntimeError(
+                "TDHookWorkflowRunner requires TDHook public execution evidence; install the supported TDHook revision"
+            )
+        configured_steps = tuple(
+            _configured_step_description(description) for description in describe(self.interaction.module, data)
+        )
         event_start = len(self.interaction.events)
         with self.interaction, self.interaction.observe_module_calls():
-            with _capture_workflow_plan(workflow) as observed_plans:
-                result = workflow.run(self.interaction.module, data)
-        if len(observed_plans) != 1:
-            raise RuntimeError("TDHook workflow execution did not expose exactly one execution plan")
-        plan = observed_plans[0]
-        if expected_plan is not None and plan != expected_plan:
+            execution = run_with_plan(self.interaction.module, data)
+        result = execution.data
+        plan = execution.plan
+        if not isinstance(result, TensorDictBase) or not isinstance(plan, WorkflowPlan):
+            raise TypeError("TDHook workflow execution returned invalid public evidence")
+        if plan != preflight_plan:
             raise RuntimeError("TDHook workflow plan changed during execution")
         events = tuple(self.interaction.events[event_start:])
         model_calls = sum(event.kind is LifecycleEventType.AFTER for event in events)
@@ -96,6 +108,7 @@ class TDHookWorkflowRunner:
         provenance = WorkflowProvenance.capture(
             self.interaction.contract,
             plan,
+            configured_steps,
             events,
             code_revision=code_revision,
             seed=seed,
@@ -144,27 +157,22 @@ class TDHookWorkflowRunner:
                 )
 
 
-@contextmanager
-def _capture_workflow_plan(workflow: Workflow) -> Iterator[list[WorkflowPlan]]:
-    """Capture the exact plan built by TDHook inside ``Workflow.run``."""
-    observed: list[WorkflowPlan] = []
-    original = workflow._build_plan
-
-    def capture(nodes: Any) -> WorkflowPlan:
-        plan = original(nodes)
-        observed.append(plan)
-        return plan
-
-    workflow._build_plan = capture  # type: ignore[method-assign]
-    try:
-        yield observed
-    finally:
-        del workflow._build_plan
-
-
 def _has_uninitialized_parameters(module: torch.nn.Module) -> bool:
     uninitialized = (torch.nn.parameter.UninitializedParameter, torch.nn.parameter.UninitializedBuffer)
     return any(isinstance(value, uninitialized) for value in (*module.parameters(), *module.buffers()))
+
+
+def _configured_step_description(description: object) -> str:
+    """Serialize one TDHook public configured-step description deterministically."""
+    to_dict = getattr(description, "to_dict", None)
+    if not callable(to_dict):
+        raise TypeError("TDHook configured-step descriptions must expose to_dict()")
+    import json
+
+    try:
+        return json.dumps(to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise TypeError("TDHook configured-step description must be JSON-compatible") from error
 
 
 def _reject_unsupported_module(module: torch.nn.Module) -> None:

@@ -4,7 +4,6 @@ import tomllib
 import pytest
 import torch
 from tensordict.nn import TensorDictModule
-from tdhook.workflow import Workflow
 
 from xdrl.compatibility import (
     PRIVATE_UPSTREAM_APIS,
@@ -31,11 +30,6 @@ def test_compiled_module_marker_remains_fail_closed() -> None:
 
     with pytest.raises(NotImplementedError, match="torch.compile"):
         _reject_unsupported_module(policy)
-
-
-@pytest.mark.upstream_compatibility
-def test_workflow_plan_builder_remains_available_for_exact_execution_evidence() -> None:
-    assert callable(Workflow._build_plan)
 
 
 @pytest.mark.upstream_compatibility

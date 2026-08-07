@@ -28,7 +28,7 @@ from xdrl.interactions import (
 )
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
-WORKFLOW_PROVENANCE_SCHEMA_REVISION = 1
+WORKFLOW_PROVENANCE_SCHEMA_REVISION = 2
 
 
 class ProvenanceSchemaError(ValueError):
@@ -109,6 +109,7 @@ class WorkflowProvenance:
     schema_revision: int
     interaction_contract: Mapping[str, Any]
     workflow_plan: WorkflowPlanEvidence
+    configured_steps: tuple[str, ...]
     lifecycle_events: tuple[LifecycleEvent, ...]
     dependencies: Mapping[str, str]
     code_revision: str
@@ -126,6 +127,7 @@ class WorkflowProvenance:
         if self.seed is not None and type(self.seed) is not int:
             raise ProvenanceSchemaError("seed must be an integer or null")
         dependencies = _validate_dependencies(self.dependencies)
+        configured_steps = _configured_step_sequence(self.configured_steps)
         if any(event.interaction_id != interaction_id for event in self.lifecycle_events):
             raise ProvenanceSchemaError("lifecycle events must belong to the interaction contract")
         if self.model_calls != self.workflow_plan.model_passes:
@@ -135,6 +137,7 @@ class WorkflowProvenance:
             )
         _validate_lifecycle(self.lifecycle_events, contract, self.workflow_plan.model_passes)
         object.__setattr__(self, "interaction_contract", _freeze_json(contract))
+        object.__setattr__(self, "configured_steps", configured_steps)
         object.__setattr__(self, "dependencies", MappingProxyType(dependencies))
         try:
             json.dumps(self.to_dict(), sort_keys=True, allow_nan=False)
@@ -161,6 +164,7 @@ class WorkflowProvenance:
         cls,
         contract: InteractionContract,
         plan: WorkflowPlan,
+        configured_steps: tuple[str, ...],
         events: tuple[LifecycleEvent, ...],
         *,
         code_revision: str,
@@ -177,6 +181,7 @@ class WorkflowProvenance:
             schema_revision=WORKFLOW_PROVENANCE_SCHEMA_REVISION,
             interaction_contract=_json_copy(contract.to_dict(), "interaction_contract"),
             workflow_plan=WorkflowPlanEvidence.from_plan(plan),
+            configured_steps=_configured_step_sequence(configured_steps),
             lifecycle_events=events,
             dependencies=validated_dependencies,
             code_revision=code_revision,
@@ -199,6 +204,7 @@ class WorkflowProvenance:
             "schema_revision": self.schema_revision,
             "interaction_contract": _thaw_json(self.interaction_contract),
             "workflow_plan": asdict(self.workflow_plan),
+            "configured_steps": list(self.configured_steps),
             "lifecycle_events": [event.to_dict() for event in self.lifecycle_events],
             "dependencies": dict(self.dependencies),
             "code_revision": self.code_revision,
@@ -235,6 +241,7 @@ class WorkflowProvenance:
             )
         contract = _contract_projection(payload["interaction_contract"])
         plan = _plan_evidence(payload["workflow_plan"])
+        configured_steps = _configured_steps(payload["configured_steps"])
         events = _lifecycle_events(payload["lifecycle_events"])
         dependencies = _validate_dependencies(_string_mapping(payload["dependencies"], "dependencies"))
         seed = payload.get("seed")
@@ -244,6 +251,7 @@ class WorkflowProvenance:
             schema_revision=revision,
             interaction_contract=contract,
             workflow_plan=plan,
+            configured_steps=configured_steps,
             lifecycle_events=events,
             dependencies=dependencies,
             code_revision=_nonempty_string(payload["code_revision"], "code_revision"),
@@ -698,6 +706,20 @@ def _strings(value: Any, field: str) -> tuple[str, ...]:
     if not isinstance(value, list):
         raise ProvenanceSchemaError(f"{field} must be an array")
     return tuple(_nonempty_string(item, f"{field}[{index}]") for index, item in enumerate(value))
+
+
+def _configured_steps(value: Any) -> tuple[str, ...]:
+    """Validate TDHook's ordered, result-affecting step descriptions."""
+    if not isinstance(value, list):
+        raise ProvenanceSchemaError("configured_steps must be an array")
+    return _configured_step_sequence(value)
+
+
+def _configured_step_sequence(value: Any) -> tuple[str, ...]:
+    """Normalize already-constructed configured-step descriptions."""
+    if not isinstance(value, (list, tuple)):
+        raise ProvenanceSchemaError("configured_steps must be an array")
+    return tuple(_nonempty_string(item, f"configured_steps[{index}]") for index, item in enumerate(value))
 
 
 def _dimensions(value: Any, field: str) -> tuple[int, ...]:
