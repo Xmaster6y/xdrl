@@ -16,7 +16,7 @@ from typing import Any, Iterator
 import torch
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
-from tdhook.execution import GradientMode
+from tdhook.execution import AutogradLifetime, GradientMode
 from tdhook.workflow import Workflow, WorkflowPlan, WorkflowUpdate
 
 from xdrl.interactions import LifecycleEventType, RuntimeInteractionContext
@@ -116,10 +116,15 @@ class TDHookWorkflowRunner:
         contract = self.interaction.contract
         for execution in plan.executions:
             if execution.gradient_mode is GradientMode.REQUIRED:
-                raise ValueError(
-                    "gradient-required TDHook workflows are unsupported because Workflow.run removes hook bindings "
-                    "before a caller-managed backward pass"
-                )
+                if execution.autograd_lifetime is AutogradLifetime.BACKWARD:
+                    raise ValueError(
+                        "deferred-backward TDHook workflows are unsupported because XDRL does not own the "
+                        "caller-managed backward lifecycle"
+                    )
+                if contract.inference_mode:
+                    raise ValueError("gradient-required TDHook execution is incompatible with inference_mode=True")
+                if not contract.gradient_enabled:
+                    raise ValueError("gradient-required TDHook execution requires gradient_enabled=True")
             if execution.gradient_mode is GradientMode.DISABLED and contract.gradient_enabled:
                 raise ValueError("gradient-disabled TDHook execution is incompatible with gradient_enabled=True")
 

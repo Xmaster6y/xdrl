@@ -1541,15 +1541,11 @@ wheels = [
 [[package]]
 name = "tdhook"
 version = "0.2.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/Xmaster6y/tdhook?rev=ea51fe37094d19ddbdacb5db685583a5d1b88b3a#ea51fe37094d19ddbdacb5db685583a5d1b88b3a" }
 dependencies = [
     { name = "tensordict" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'" },
     { name = "torch", version = "2.14.0.dev20260805", source = { registry = "https://download.pytorch.org/whl/nightly/cpu" }, marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/cb/c8/2ac21e42bb02ffed5c3b951fe1d42874950b9bc6519d9e0db15748b96500/tdhook-0.2.0.tar.gz", hash = "sha256:e01bf8994d0506951f70f0b064b10b90484bae27211fa8a847ed05944b54beae", size = 86621, upload-time = "2026-08-05T09:02:06.168Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/36/809528e1e867177b819a15ff3f52129bf8bd76d985b87c120df9224cc2e9/tdhook-0.2.0-py3-none-any.whl", hash = "sha256:cb9f9ac6cf1f50ef6c5875f0d1c8b6384b17547e355ba95853b344e030f1c7eb", size = 83708, upload-time = "2026-08-05T09:02:04.771Z" },
 ]
 
 [[package]]
@@ -1809,7 +1805,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "packaging", specifier = ">=21.0" },
-    { name = "tdhook", specifier = ">=0.2,<0.3" },
+    { name = "tdhook", git = "https://github.com/Xmaster6y/tdhook?rev=ea51fe37094d19ddbdacb5db685583a5d1b88b3a" },
     { name = "tensordict", git = "https://github.com/pytorch/tensordict" },
     { name = "torch", marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'", specifier = ">=2.11", index = "https://pypi.org/simple" },
     { name = "torch", marker = "python_full_version != '3.12.*' and sys_platform == 'darwin'", specifier = ">=2.11", index = "https://download.pytorch.org/whl/nightly/cpu" },
