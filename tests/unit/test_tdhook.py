@@ -1,10 +1,11 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
-from tdhook.execution import ExecutionSpec, GradientMode
+from tdhook.execution import AutogradLifetime, ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching
 from tdhook.workflow import Workflow, WorkflowPlan
 
@@ -105,19 +106,84 @@ def test_workflow_gradient_requirements_must_match_the_rl_interaction() -> None:
         runner.run(workflow, runner.interaction.representative_input.clone(), code_revision="test-revision")
 
 
-def test_gradient_required_workflow_is_rejected_even_when_forward_gradients_are_enabled() -> None:
+def test_gradient_required_execution_without_a_lifetime_declaration_is_rejected() -> None:
+    runner = TDHookWorkflowRunner(_interaction())
+    plan = SimpleNamespace(executions=(SimpleNamespace(gradient_mode=GradientMode.REQUIRED),))
+
+    with pytest.raises(ValueError, match="autograd lifetime declaration"):
+        runner._validate_gradient_contract(plan)  # type: ignore[arg-type]
+
+
+class _DeferredBackwardCaching(ActivationCaching):
+    @property
+    def execution_spec(self) -> ExecutionSpec:
+        return ExecutionSpec(gradient_mode=GradientMode.REQUIRED, autograd_lifetime=AutogradLifetime.BACKWARD)
+
+
+class _InternalBackwardWorkflow(Workflow):
+    def run_with_plan(self, model: torch.nn.Module, data: TensorDict):  # type: ignore[no-untyped-def]
+        result = super().run_with_plan(model, data)
+        result.data.get(("agents", "action")).sum().backward()
+        return result
+
+
+def test_gradient_required_call_lifetime_workflow_runs_when_xdrl_owns_enabled_gradients() -> None:
     interaction = _interaction()
     interaction.contract = replace(interaction.contract, gradient_enabled=True)
     runner = TDHookWorkflowRunner(interaction)
 
-    with pytest.raises(ValueError, match="caller-managed backward pass"):
+    execution = runner.run(
+        _InternalBackwardWorkflow(_RequiredGradientCaching("module")),
+        interaction.representative_input.clone(),
+        code_revision="test-revision",
+    )
+
+    assert execution.plan.executions[0].autograd_lifetime is AutogradLifetime.CALL
+    assert interaction.module.module.weight.grad is not None
+    assert not interaction.module.module._forward_hooks
+
+
+def test_gradient_required_call_lifetime_workflow_requires_enabled_gradients() -> None:
+    runner = TDHookWorkflowRunner(_interaction())
+
+    with pytest.raises(ValueError, match="requires gradient_enabled=True"):
         runner.run(
-            Workflow(_RequiredGradientCaching("module")),
-            interaction.representative_input.clone(),
+            _InternalBackwardWorkflow(_RequiredGradientCaching("module")),
+            runner.interaction.representative_input.clone(),
             code_revision="test-revision",
         )
 
-    assert not interaction.events
+    assert not runner.interaction.events
+
+
+def test_gradient_required_call_lifetime_workflow_rejects_inference_mode() -> None:
+    interaction = _interaction()
+    interaction.contract = replace(interaction.contract, inference_mode=True)
+    runner = TDHookWorkflowRunner(interaction)
+
+    with pytest.raises(ValueError, match="incompatible with inference_mode=True"):
+        runner.run(
+            _InternalBackwardWorkflow(_RequiredGradientCaching("module")),
+            runner.interaction.representative_input.clone(),
+            code_revision="test-revision",
+        )
+
+    assert not runner.interaction.events
+
+
+def test_deferred_backward_workflow_remains_rejected() -> None:
+    interaction = _interaction()
+    interaction.contract = replace(interaction.contract, gradient_enabled=True)
+    runner = TDHookWorkflowRunner(interaction)
+
+    with pytest.raises(ValueError, match="deferred-backward"):
+        runner.run(
+            Workflow(_DeferredBackwardCaching("module")),
+            runner.interaction.representative_input.clone(),
+            code_revision="test-revision",
+        )
+
+    assert not runner.interaction.events
 
 
 class _DisabledGradientCaching(ActivationCaching):

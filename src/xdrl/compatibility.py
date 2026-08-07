@@ -85,6 +85,7 @@ SUPPORTED_DEPENDENCIES = (
 SUPPORTED_GIT_REVISIONS = (
     GitRevisionRequirement("tensordict", "54a147b2d3c21ac407661a26e27a9b0c37e7fbd3"),
     GitRevisionRequirement("torchrl", "ae421b98d0dba86e5ab0b24917d1e64f376ee6f9"),
+    GitRevisionRequirement("tdhook", "ea51fe37094d19ddbdacb5db685583a5d1b88b3a"),
 )
 # dependency-snapshot: end
 
