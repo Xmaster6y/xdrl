@@ -5,9 +5,7 @@ build:
   tools:
     python: "3.11"
   commands:
-    - asdf plugin add uv
-    - asdf install uv latest
-    - asdf global uv latest
+    - python -m pip install --upgrade uv
     - uv pip install --system cmake
     - uv sync --locked
     - cd docs && uv run --group docs make html
