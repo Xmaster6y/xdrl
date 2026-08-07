@@ -9,9 +9,7 @@ plan-to-call-count evidence around every actual root model call.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Iterator
 
 import torch
 from tensordict import TensorDictBase
@@ -80,11 +78,25 @@ class TDHookWorkflowRunner:
         self._reject_interaction_module_operators(workflow)
         event_start = len(self.interaction.events)
         with self.interaction, self.interaction.observe_module_calls():
-            with _capture_workflow_plan(workflow) as observed_plans:
-                result = workflow.run(self.interaction.module, data)
-        if len(observed_plans) != 1:
-            raise RuntimeError("TDHook workflow execution did not expose exactly one execution plan")
-        plan = observed_plans[0]
+            execute = getattr(workflow, "run_with_evidence", workflow.run)
+            execution = execute(self.interaction.module, data)
+        if isinstance(execution, TensorDictBase):
+            # TDHook 0.2.0 compatibility.  This uses only public surfaces and
+            # fails closed if a second public plan no longer agrees.
+            result = execution
+            plan = workflow.plan(self.interaction.module, data)
+            configured_steps = tuple(
+                f"{index}:{type(item.step if isinstance(item, WorkflowUpdate) else item).__name__}"
+                for index, item in enumerate(workflow.steps)
+            )
+            if plan != preflight_plan:
+                raise RuntimeError("TDHook workflow plan changed during execution")
+        else:
+            result = execution.data
+            plan = execution.plan
+            configured_steps = execution.configured_steps
+            if not isinstance(result, TensorDictBase) or not isinstance(plan, WorkflowPlan):
+                raise TypeError("TDHook workflow execution returned invalid public evidence")
         if expected_plan is not None and plan != expected_plan:
             raise RuntimeError("TDHook workflow plan changed during execution")
         events = tuple(self.interaction.events[event_start:])
@@ -96,6 +108,7 @@ class TDHookWorkflowRunner:
         provenance = WorkflowProvenance.capture(
             self.interaction.contract,
             plan,
+            configured_steps,
             events,
             code_revision=code_revision,
             seed=seed,
@@ -132,24 +145,6 @@ class TDHookWorkflowRunner:
                 raise ValueError(
                     "workflow operators must not invoke the interaction module; use a TDHook method for root calls"
                 )
-
-
-@contextmanager
-def _capture_workflow_plan(workflow: Workflow) -> Iterator[list[WorkflowPlan]]:
-    """Capture the exact plan built by TDHook inside ``Workflow.run``."""
-    observed: list[WorkflowPlan] = []
-    original = workflow._build_plan
-
-    def capture(nodes: Any) -> WorkflowPlan:
-        plan = original(nodes)
-        observed.append(plan)
-        return plan
-
-    workflow._build_plan = capture  # type: ignore[method-assign]
-    try:
-        yield observed
-    finally:
-        del workflow._build_plan
 
 
 def _has_uninitialized_parameters(module: torch.nn.Module) -> bool:

@@ -157,13 +157,6 @@ PRIVATE_UPSTREAM_APIS = (
         "tests/upstream_compatibility/test_private_apis.py",
         "detect compiled descendants before TDHook installation",
     ),
-    PrivateAPIUsage(
-        "tdhook",
-        "tdhook.workflow.Workflow._build_plan",
-        ("src/xdrl/tdhook.py",),
-        "tests/upstream_compatibility/test_private_apis.py",
-        "capture the exact plan built inside Workflow.run until TDHook exposes execution evidence publicly",
-    ),
 )
 
 

@@ -1,9 +1,11 @@
+from dataclasses import dataclass
+
 import pytest
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from tdhook.latent import ActivationCaching
-from tdhook.workflow import CompatibilityDecision, Workflow, WorkflowPlan
+from tdhook.workflow import Workflow, WorkflowPlan
 
 from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 from xdrl.tdhook import TDHookWorkflowRunner
@@ -123,31 +125,44 @@ def test_planned_and_observed_model_passes_must_match() -> None:
     assert not interaction.module._forward_hooks
 
 
-class _ChangingPlanWorkflow(Workflow):
-    builds = 0
+@dataclass(frozen=True)
+class _PublicExecutionEvidence:
+    data: TensorDict
+    plan: WorkflowPlan
+    configured_steps: tuple[str, ...]
 
-    @staticmethod
-    def _build_plan(nodes: object) -> WorkflowPlan:
-        plan = Workflow._build_plan(nodes)  # type: ignore[arg-type]
-        _ChangingPlanWorkflow.builds += 1
-        if _ChangingPlanWorkflow.builds == 1:
-            return plan
-        changed = CompatibilityDecision((), "dynamic", False, "changed during execution")
-        return WorkflowPlan(plan.executions, (*plan.compatibility, changed))
+
+class _EvidenceWorkflow(Workflow):
+    def run_with_evidence(self, model: torch.nn.Module, data: TensorDict) -> _PublicExecutionEvidence:
+        plan = self.plan(model, data)
+        result = super().run(model, data)
+        return _PublicExecutionEvidence(result, plan, ("ActivationCaching(module, activations/head)",))
 
 
 @pytest.mark.integration
-def test_runner_captures_the_exact_plan_built_inside_workflow_run() -> None:
+def test_runner_consumes_public_execution_plan_and_configured_step_descriptions() -> None:
     interaction, _ = _interaction()
-    workflow = _ChangingPlanWorkflow(ActivationCaching("module"))
-    _ChangingPlanWorkflow.builds = 0
+    workflow = _EvidenceWorkflow(ActivationCaching("module", cache_key=("activations", "head")))
 
     execution = TDHookWorkflowRunner(interaction).run(
         workflow, interaction.representative_input.clone(), code_revision="test-revision"
     )
 
-    assert execution.plan.compatibility[-1].reason == "changed during execution"
-    assert execution.provenance.workflow_plan.compatibility[-1].reason == "changed during execution"
+    assert execution.plan == workflow.plan(interaction.module, interaction.representative_input.clone())
+    assert execution.provenance.configured_steps == ("ActivationCaching(module, activations/head)",)
+
+
+@pytest.mark.integration
+def test_runner_captures_the_exact_plan_built_inside_workflow_run() -> None:
+    interaction, _ = _interaction()
+    workflow = Workflow(ActivationCaching("module"))
+
+    execution = TDHookWorkflowRunner(interaction).run(
+        workflow, interaction.representative_input.clone(), code_revision="test-revision"
+    )
+
+    assert execution.plan == workflow.plan(interaction.module, interaction.representative_input.clone())
+    assert execution.provenance.configured_steps
 
 
 @pytest.mark.integration
