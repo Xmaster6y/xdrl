@@ -18,7 +18,7 @@ from tdhook.execution import GradientMode
 from tdhook.workflow import Workflow, WorkflowPlan, WorkflowUpdate
 
 from xdrl.interactions import LifecycleEventType, RuntimeInteractionContext
-from xdrl.provenance import WorkflowProvenance
+from xdrl.provenance import InputArtifactReference, OutputArtifactReference, WorkflowProvenance
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +63,8 @@ class TDHookWorkflowRunner:
         expected_plan: WorkflowPlan | None = None,
         seed: int | None = None,
         dependencies: Mapping[str, str] | None = None,
+        input_artifacts: tuple[InputArtifactReference, ...] = (),
+        output_artifacts: tuple[OutputArtifactReference, ...] = (),
     ) -> TDHookWorkflowResult:
         """Execute ``workflow`` and capture versioned plan-to-call provenance."""
         self._validate_boundary(workflow, data)
@@ -70,6 +72,8 @@ class TDHookWorkflowRunner:
             code_revision=code_revision,
             seed=seed,
             dependencies=dependencies,
+            input_artifacts=input_artifacts,
+            output_artifacts=output_artifacts,
         )
         preflight_plan = workflow.plan(self.interaction.module, data)
         if expected_plan is not None and preflight_plan != expected_plan:
@@ -113,6 +117,8 @@ class TDHookWorkflowRunner:
             code_revision=code_revision,
             seed=seed,
             dependencies=validated_dependencies,
+            input_artifacts=input_artifacts,
+            output_artifacts=output_artifacts,
         )
         return TDHookWorkflowResult(result, plan, provenance)
 

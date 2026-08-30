@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import MISSING, asdict, dataclass, fields
+from dataclasses import MISSING, asdict, dataclass, field, fields
 from enum import Enum
 from types import MappingProxyType
 from typing import Any
@@ -28,11 +28,107 @@ from xdrl.interactions import (
 )
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
-WORKFLOW_PROVENANCE_SCHEMA_REVISION = 2
+WORKFLOW_PROVENANCE_SCHEMA_REVISION = 3
 
 
 class ProvenanceSchemaError(ValueError):
     """A workflow provenance payload violates the current schema."""
+
+
+class ArtifactDigestAlgorithm(str, Enum):
+    """Supported cryptographic digest algorithms for external artifacts."""
+
+    SHA256 = "sha256"
+    SHA384 = "sha384"
+    SHA512 = "sha512"
+    BLAKE2B = "blake2b"
+    BLAKE2S = "blake2s"
+
+
+class InputArtifactRole(str, Enum):
+    """The declared role an external input plays in a workflow run."""
+
+    MODEL_CHECKPOINT = "model_checkpoint"
+    DATASET = "dataset"
+    ENVIRONMENT_BUILD = "environment_build"
+    EVALUATION_SPLIT = "evaluation_split"
+    LEVEL_SET = "level_set"
+    REFERENCE_RESULT = "reference_result"
+    OTHER = "other"
+
+
+class OutputArtifactRole(str, Enum):
+    """The declared role of an artifact emitted by a workflow run."""
+
+    METRICS_BUNDLE = "metrics_bundle"
+    OBSERVATION_TRACE = "observation_trace"
+    ATTRIBUTION = "attribution"
+    INTERVENTION_RESULT = "intervention_result"
+    FIGURE = "figure"
+    OTHER = "other"
+
+
+_DIGEST_HEX_LENGTH = {
+    ArtifactDigestAlgorithm.SHA256: 64,
+    ArtifactDigestAlgorithm.SHA384: 96,
+    ArtifactDigestAlgorithm.SHA512: 128,
+    ArtifactDigestAlgorithm.BLAKE2B: 128,
+    ArtifactDigestAlgorithm.BLAKE2S: 64,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class InputArtifactReference:
+    """Tensor-free identity for one external input used by a workflow."""
+
+    identity: str
+    role: InputArtifactRole
+    digest_algorithm: ArtifactDigestAlgorithm
+    digest_value: str
+    source: str | None = None
+    revision: str | None = None
+    source_is_immutable: bool = False
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _validate_artifact_reference(self, "input artifact")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a detached JSON-compatible representation."""
+        return _artifact_reference_dict(self)
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> InputArtifactReference:
+        """Strictly decode one input artifact reference."""
+        values = _artifact_reference_values(payload, "input artifact", InputArtifactRole)
+        return cls(**values)
+
+
+@dataclass(frozen=True, slots=True)
+class OutputArtifactReference:
+    """Tensor-free identity for one result artifact emitted by a workflow."""
+
+    identity: str
+    role: OutputArtifactRole
+    digest_algorithm: ArtifactDigestAlgorithm
+    digest_value: str
+    source: str | None = None
+    revision: str | None = None
+    source_is_immutable: bool = False
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _validate_artifact_reference(self, "output artifact")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a detached JSON-compatible representation."""
+        return _artifact_reference_dict(self)
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> OutputArtifactReference:
+        """Strictly decode one output artifact reference."""
+        values = _artifact_reference_values(payload, "output artifact", OutputArtifactRole)
+        return cls(**values)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +209,8 @@ class WorkflowProvenance:
     lifecycle_events: tuple[LifecycleEvent, ...]
     dependencies: Mapping[str, str]
     code_revision: str
+    input_artifacts: tuple[InputArtifactReference, ...]
+    output_artifacts: tuple[OutputArtifactReference, ...]
     seed: int | None = None
 
     def __post_init__(self) -> None:
@@ -128,6 +226,7 @@ class WorkflowProvenance:
             raise ProvenanceSchemaError("seed must be an integer or null")
         dependencies = _validate_dependencies(self.dependencies)
         configured_steps = _configured_step_sequence(self.configured_steps)
+        input_artifacts, output_artifacts = _artifact_references(self.input_artifacts, self.output_artifacts)
         if any(event.interaction_id != interaction_id for event in self.lifecycle_events):
             raise ProvenanceSchemaError("lifecycle events must belong to the interaction contract")
         if self.model_calls != self.workflow_plan.model_passes:
@@ -139,6 +238,8 @@ class WorkflowProvenance:
         object.__setattr__(self, "interaction_contract", _freeze_json(contract))
         object.__setattr__(self, "configured_steps", configured_steps)
         object.__setattr__(self, "dependencies", MappingProxyType(dependencies))
+        object.__setattr__(self, "input_artifacts", input_artifacts)
+        object.__setattr__(self, "output_artifacts", output_artifacts)
         try:
             json.dumps(self.to_dict(), sort_keys=True, allow_nan=False)
         except (TypeError, ValueError) as error:
@@ -151,12 +252,15 @@ class WorkflowProvenance:
         code_revision: str,
         seed: int | None = None,
         dependencies: Mapping[str, str] | None = None,
+        input_artifacts: tuple[InputArtifactReference, ...] = (),
+        output_artifacts: tuple[OutputArtifactReference, ...] = (),
     ) -> dict[str, str]:
         """Validate reproduction metadata before a workflow mutates live state."""
         _nonempty_string(code_revision, "code_revision")
         if seed is not None and type(seed) is not int:
             raise ProvenanceSchemaError("seed must be an integer or null")
         resolved = installed_dependency_versions() if dependencies is None else dependencies
+        _artifact_references(input_artifacts, output_artifacts)
         return _validate_dependencies(dict(resolved))
 
     @classmethod
@@ -170,12 +274,16 @@ class WorkflowProvenance:
         code_revision: str,
         seed: int | None = None,
         dependencies: Mapping[str, str] | None = None,
+        input_artifacts: tuple[InputArtifactReference, ...] = (),
+        output_artifacts: tuple[OutputArtifactReference, ...] = (),
     ) -> WorkflowProvenance:
         """Capture verified workflow evidence from public XDRL and TDHook state."""
         validated_dependencies = cls.validate_run_metadata(
             code_revision=code_revision,
             seed=seed,
             dependencies=dependencies,
+            input_artifacts=input_artifacts,
+            output_artifacts=output_artifacts,
         )
         return cls(
             schema_revision=WORKFLOW_PROVENANCE_SCHEMA_REVISION,
@@ -185,6 +293,8 @@ class WorkflowProvenance:
             lifecycle_events=events,
             dependencies=validated_dependencies,
             code_revision=code_revision,
+            input_artifacts=input_artifacts,
+            output_artifacts=output_artifacts,
             seed=seed,
         )
 
@@ -208,6 +318,8 @@ class WorkflowProvenance:
             "lifecycle_events": [event.to_dict() for event in self.lifecycle_events],
             "dependencies": dict(self.dependencies),
             "code_revision": self.code_revision,
+            "input_artifacts": [artifact.to_dict() for artifact in self.input_artifacts],
+            "output_artifacts": [artifact.to_dict() for artifact in self.output_artifacts],
             "seed": self.seed,
         }
         return _json_copy(payload, "workflow provenance")
@@ -221,6 +333,17 @@ class WorkflowProvenance:
         """Decode provenance while rejecting unknown revisions or fields."""
         if not isinstance(payload, Mapping):
             raise ProvenanceSchemaError("workflow provenance must contain an object")
+        revision = payload.get("schema_revision")
+        if type(revision) is not int or revision != WORKFLOW_PROVENANCE_SCHEMA_REVISION:
+            if revision == 2:
+                raise ProvenanceSchemaError(
+                    "workflow provenance schema revision 2 predates artifact references and cannot be migrated "
+                    "without caller-supplied artifact identities; decode it with an XDRL version that supports revision 2"
+                )
+            raise ProvenanceSchemaError(
+                f"unsupported workflow provenance schema revision {revision!r}; "
+                f"expected {WORKFLOW_PROVENANCE_SCHEMA_REVISION}"
+            )
         model_fields = fields(cls)
         known = {item.name for item in model_fields}
         required = {item.name for item in model_fields if item.default is MISSING and item.default_factory is MISSING}
@@ -233,17 +356,13 @@ class WorkflowProvenance:
             if unknown:
                 details.append(f"unknown fields: {', '.join(sorted(unknown))}")
             raise ProvenanceSchemaError("; ".join(details))
-        revision = payload["schema_revision"]
-        if type(revision) is not int or revision != WORKFLOW_PROVENANCE_SCHEMA_REVISION:
-            raise ProvenanceSchemaError(
-                f"unsupported workflow provenance schema revision {revision!r}; "
-                f"expected {WORKFLOW_PROVENANCE_SCHEMA_REVISION}"
-            )
         contract = _contract_projection(payload["interaction_contract"])
         plan = _plan_evidence(payload["workflow_plan"])
         configured_steps = _configured_steps(payload["configured_steps"])
         events = _lifecycle_events(payload["lifecycle_events"])
         dependencies = _validate_dependencies(_string_mapping(payload["dependencies"], "dependencies"))
+        input_artifacts = _decoded_artifacts(payload["input_artifacts"], "input_artifacts", InputArtifactReference)
+        output_artifacts = _decoded_artifacts(payload["output_artifacts"], "output_artifacts", OutputArtifactReference)
         seed = payload.get("seed")
         if seed is not None and type(seed) is not int:
             raise ProvenanceSchemaError("seed must be an integer or null")
@@ -255,6 +374,8 @@ class WorkflowProvenance:
             lifecycle_events=events,
             dependencies=dependencies,
             code_revision=_nonempty_string(payload["code_revision"], "code_revision"),
+            input_artifacts=input_artifacts,
+            output_artifacts=output_artifacts,
             seed=seed,
         )
 
@@ -614,6 +735,108 @@ def _required_dependency_names() -> set[str]:
     return {"python", "torch", "tensordict", "torchrl", "tdhook", "xdrl"}
 
 
+def _validate_artifact_reference(value: Any, field: str) -> None:
+    _nonempty_string(value.identity, f"{field}.identity")
+    expected_role = InputArtifactRole if isinstance(value, InputArtifactReference) else OutputArtifactRole
+    if not isinstance(value.role, expected_role):
+        raise ProvenanceSchemaError(f"{field}.role must be a {expected_role.__name__}")
+    if not isinstance(value.digest_algorithm, ArtifactDigestAlgorithm):
+        raise ProvenanceSchemaError(f"{field}.digest_algorithm must be an ArtifactDigestAlgorithm")
+    digest = _nonempty_string(value.digest_value, f"{field}.digest_value")
+    expected_length = _DIGEST_HEX_LENGTH[value.digest_algorithm]
+    if len(digest) != expected_length or any(character not in "0123456789abcdef" for character in digest):
+        raise ProvenanceSchemaError(
+            f"{field}.digest_value must be {expected_length} lowercase hexadecimal characters "
+            f"for {value.digest_algorithm.value}"
+        )
+    source = _optional_string(value.source, f"{field}.source")
+    revision = _optional_string(value.revision, f"{field}.revision")
+    if type(value.source_is_immutable) is not bool:
+        raise ProvenanceSchemaError(f"{field}.source_is_immutable must be a boolean")
+    if revision is not None and source is None:
+        raise ProvenanceSchemaError(f"{field}.revision requires source")
+    if value.source_is_immutable and source is None:
+        raise ProvenanceSchemaError(f"{field}.source_is_immutable requires source")
+    if source is not None and revision is None and not value.source_is_immutable:
+        raise ProvenanceSchemaError(f"{field}.source requires a revision unless it is explicitly immutable")
+    metadata = _json_object(value.metadata, f"{field}.metadata")
+    object.__setattr__(value, "metadata", _freeze_json(metadata))
+
+
+def _artifact_reference_dict(value: InputArtifactReference | OutputArtifactReference) -> dict[str, Any]:
+    return {
+        "identity": value.identity,
+        "role": value.role.value,
+        "digest_algorithm": value.digest_algorithm.value,
+        "digest_value": value.digest_value,
+        "source": value.source,
+        "revision": value.revision,
+        "source_is_immutable": value.source_is_immutable,
+        "metadata": _thaw_json(value.metadata),
+    }
+
+
+def _artifact_reference_values(
+    payload: Mapping[str, Any], field: str, role_type: type[InputArtifactRole] | type[OutputArtifactRole]
+) -> dict[str, Any]:
+    entry = _exact_mapping(
+        payload,
+        field,
+        {
+            "identity",
+            "role",
+            "digest_algorithm",
+            "digest_value",
+            "source",
+            "revision",
+            "source_is_immutable",
+            "metadata",
+        },
+    )
+    try:
+        role = role_type(entry["role"])
+    except (TypeError, ValueError) as error:
+        raise ProvenanceSchemaError(f"{field}.role must be a known string value") from error
+    try:
+        algorithm = ArtifactDigestAlgorithm(entry["digest_algorithm"])
+    except (TypeError, ValueError) as error:
+        raise ProvenanceSchemaError(f"{field}.digest_algorithm must be a known string value") from error
+    return {
+        "identity": entry["identity"],
+        "role": role,
+        "digest_algorithm": algorithm,
+        "digest_value": entry["digest_value"],
+        "source": entry["source"],
+        "revision": entry["revision"],
+        "source_is_immutable": entry["source_is_immutable"],
+        "metadata": entry["metadata"],
+    }
+
+
+def _decoded_artifacts(value: Any, field: str, artifact_type: Any) -> tuple[Any, ...]:
+    if not isinstance(value, list):
+        raise ProvenanceSchemaError(f"{field} must be an array")
+    return tuple(artifact_type.from_dict(item) for item in value)
+
+
+def _artifact_references(
+    input_artifacts: Any, output_artifacts: Any
+) -> tuple[tuple[InputArtifactReference, ...], tuple[OutputArtifactReference, ...]]:
+    if not isinstance(input_artifacts, (list, tuple)) or not all(
+        isinstance(item, InputArtifactReference) for item in input_artifacts
+    ):
+        raise ProvenanceSchemaError("input_artifacts must contain only InputArtifactReference values")
+    if not isinstance(output_artifacts, (list, tuple)) or not all(
+        isinstance(item, OutputArtifactReference) for item in output_artifacts
+    ):
+        raise ProvenanceSchemaError("output_artifacts must contain only OutputArtifactReference values")
+    identities = [item.identity for item in (*input_artifacts, *output_artifacts)]
+    duplicates = sorted({identity for identity in identities if identities.count(identity) > 1})
+    if duplicates:
+        raise ProvenanceSchemaError(f"artifact identities must be unique: {', '.join(duplicates)}")
+    return tuple(input_artifacts), tuple(output_artifacts)
+
+
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise ProvenanceSchemaError(f"{field} must be an object with string keys")
@@ -785,6 +1008,11 @@ def _thaw_json(value: Any) -> Any:
 
 
 __all__ = [
+    "ArtifactDigestAlgorithm",
+    "InputArtifactReference",
+    "InputArtifactRole",
+    "OutputArtifactReference",
+    "OutputArtifactRole",
     "ProvenanceSchemaError",
     "WORKFLOW_PROVENANCE_SCHEMA_REVISION",
     "WorkflowCompatibilityEvidence",
