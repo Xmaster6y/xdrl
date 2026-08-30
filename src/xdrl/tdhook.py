@@ -8,7 +8,7 @@ plan-to-call-count evidence around every actual root model call.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 import torch
@@ -18,7 +18,17 @@ from tdhook.execution import GradientMode
 from tdhook.workflow import Workflow, WorkflowPlan, WorkflowUpdate
 
 from xdrl.interactions import LifecycleEventType, RuntimeInteractionContext
-from xdrl.provenance import InputArtifactReference, OutputArtifactReference, WorkflowProvenance
+from xdrl.provenance import (
+    InputArtifactReference,
+    OutputArtifactDeclaration,
+    OutputArtifactDigest,
+    WorkflowProvenance,
+)
+
+OutputArtifactResolver = Callable[
+    [TensorDictBase, tuple[OutputArtifactDeclaration, ...]],
+    tuple[OutputArtifactDigest, ...],
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,17 +74,27 @@ class TDHookWorkflowRunner:
         seed: int | None = None,
         dependencies: Mapping[str, str] | None = None,
         input_artifacts: tuple[InputArtifactReference, ...] = (),
-        output_artifacts: tuple[OutputArtifactReference, ...] = (),
+        output_artifacts: tuple[OutputArtifactDeclaration, ...] = (),
+        output_artifact_resolver: OutputArtifactResolver | None = None,
     ) -> TDHookWorkflowResult:
-        """Execute ``workflow`` and capture versioned plan-to-call provenance."""
+        """Execute ``workflow`` and capture versioned plan-to-call provenance.
+
+        Output identities and roles are declared before execution. Their resolver
+        runs only after successful TDHook execution and returns the digests that
+        are bound to those exact declarations in provenance.
+        """
         self._validate_boundary(workflow, data)
         validated_dependencies = WorkflowProvenance.validate_run_metadata(
             code_revision=code_revision,
             seed=seed,
             dependencies=dependencies,
             input_artifacts=input_artifacts,
-            output_artifacts=output_artifacts,
         )
+        output_artifacts = WorkflowProvenance.validate_output_artifact_declarations(input_artifacts, output_artifacts)
+        if bool(output_artifacts) != (output_artifact_resolver is not None):
+            raise ValueError("output artifact declarations and output_artifact_resolver must be provided together")
+        if output_artifact_resolver is not None and not callable(output_artifact_resolver):
+            raise TypeError("output_artifact_resolver must be callable")
         preflight_plan = workflow.plan(self.interaction.module, data)
         if expected_plan is not None and preflight_plan != expected_plan:
             raise RuntimeError("TDHook workflow plan changed after caller preflight")
@@ -109,6 +129,12 @@ class TDHookWorkflowRunner:
             raise RuntimeError(
                 f"TDHook workflow model-pass mismatch: plan declares {plan.model_passes}, XDRL observed {model_calls}"
             )
+        resolved_output_artifacts = ()
+        if output_artifact_resolver is not None:
+            resolved_output_artifacts = WorkflowProvenance.resolve_output_artifacts(
+                output_artifacts,
+                output_artifact_resolver(result, output_artifacts),
+            )
         provenance = WorkflowProvenance.capture(
             self.interaction.contract,
             plan,
@@ -118,7 +144,7 @@ class TDHookWorkflowRunner:
             seed=seed,
             dependencies=validated_dependencies,
             input_artifacts=input_artifacts,
-            output_artifacts=output_artifacts,
+            output_artifacts=resolved_output_artifacts,
         )
         return TDHookWorkflowResult(result, plan, provenance)
 
@@ -191,4 +217,4 @@ def _reject_unsupported_module(module: torch.nn.Module) -> None:
         raise NotImplementedError("remote modules are not supported by the TDHook workflow runner")
 
 
-__all__ = ["TDHookWorkflowResult", "TDHookWorkflowRunner"]
+__all__ = ["OutputArtifactResolver", "TDHookWorkflowResult", "TDHookWorkflowRunner"]

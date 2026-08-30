@@ -56,6 +56,8 @@ from xdrl.provenance import (
     ArtifactDigestAlgorithm,
     InputArtifactReference,
     InputArtifactRole,
+    OutputArtifactDeclaration,
+    OutputArtifactDigest,
     OutputArtifactReference,
     OutputArtifactRole,
     WORKFLOW_PROVENANCE_SCHEMA_REVISION,
@@ -65,7 +67,7 @@ from xdrl.provenance import (
     WorkflowPlanEvidence,
     WorkflowProvenance,
 )
-from xdrl.tdhook import TDHookWorkflowResult, TDHookWorkflowRunner
+from xdrl.tdhook import OutputArtifactResolver, TDHookWorkflowResult, TDHookWorkflowRunner
 from xdrl.types import (
     BatchSemantics,
     ContractModule,
@@ -116,7 +118,10 @@ __all__ = [
     "ObservationKind",
     "ObservationRecord",
     "ObservationTrace",
+    "OutputArtifactDeclaration",
+    "OutputArtifactDigest",
     "OutputArtifactReference",
+    "OutputArtifactResolver",
     "OutputArtifactRole",
     "PRIVATE_UPSTREAM_APIS",
     "PrivateAPIUsage",

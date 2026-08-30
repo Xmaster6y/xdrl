@@ -78,6 +78,53 @@ _DIGEST_HEX_LENGTH = {
 
 
 @dataclass(frozen=True, slots=True)
+class OutputArtifactDigest:
+    """A digest resolved for one declared output after workflow execution."""
+
+    identity: str
+    digest_algorithm: ArtifactDigestAlgorithm
+    digest_value: str
+
+    def __post_init__(self) -> None:
+        _nonempty_string(self.identity, "output artifact digest.identity")
+        _validate_digest(
+            self.digest_algorithm,
+            self.digest_value,
+            "output artifact digest",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class OutputArtifactDeclaration:
+    """Pre-execution identity and role for an output whose digest is resolved later."""
+
+    identity: str
+    role: OutputArtifactRole
+    source: str | None = None
+    revision: str | None = None
+    source_is_immutable: bool = False
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _validate_artifact_location(self, "output artifact declaration", OutputArtifactRole)
+
+    def resolve(self, digest: OutputArtifactDigest) -> OutputArtifactReference:
+        """Combine this declaration with a post-execution digest."""
+        if digest.identity != self.identity:
+            raise ProvenanceSchemaError("output artifact digest identity must match its declaration")
+        return OutputArtifactReference(
+            identity=self.identity,
+            role=self.role,
+            digest_algorithm=digest.digest_algorithm,
+            digest_value=digest.digest_value,
+            source=self.source,
+            revision=self.revision,
+            source_is_immutable=self.source_is_immutable,
+            metadata=self.metadata,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class InputArtifactReference:
     """Tensor-free identity for one external input used by a workflow."""
 
@@ -262,6 +309,42 @@ class WorkflowProvenance:
         resolved = installed_dependency_versions() if dependencies is None else dependencies
         _artifact_references(input_artifacts, output_artifacts)
         return _validate_dependencies(dict(resolved))
+
+    @classmethod
+    def validate_output_artifact_declarations(
+        cls,
+        input_artifacts: tuple[InputArtifactReference, ...],
+        output_artifacts: tuple[OutputArtifactDeclaration, ...],
+    ) -> tuple[OutputArtifactDeclaration, ...]:
+        """Validate declared output identities before workflow execution."""
+        return _output_artifact_declarations(input_artifacts, output_artifacts)
+
+    @classmethod
+    def resolve_output_artifacts(
+        cls,
+        declarations: tuple[OutputArtifactDeclaration, ...],
+        digests: tuple[OutputArtifactDigest, ...],
+    ) -> tuple[OutputArtifactReference, ...]:
+        """Bind post-execution digests to the exact declared output identities."""
+        if not isinstance(digests, (list, tuple)) or not all(
+            isinstance(item, OutputArtifactDigest) for item in digests
+        ):
+            raise ProvenanceSchemaError("output artifact resolver must return OutputArtifactDigest values")
+        by_identity = {item.identity: item for item in digests}
+        if len(by_identity) != len(digests):
+            raise ProvenanceSchemaError("output artifact resolver returned duplicate identities")
+        declared = {item.identity for item in declarations}
+        resolved = set(by_identity)
+        if declared != resolved:
+            missing = sorted(declared - resolved)
+            unknown = sorted(resolved - declared)
+            details = []
+            if missing:
+                details.append(f"missing identities: {', '.join(missing)}")
+            if unknown:
+                details.append(f"unknown identities: {', '.join(unknown)}")
+            raise ProvenanceSchemaError(f"output artifact resolver disagrees with declarations: {'; '.join(details)}")
+        return tuple(declaration.resolve(by_identity[declaration.identity]) for declaration in declarations)
 
     @classmethod
     def capture(
@@ -736,19 +819,26 @@ def _required_dependency_names() -> set[str]:
 
 
 def _validate_artifact_reference(value: Any, field: str) -> None:
-    _nonempty_string(value.identity, f"{field}.identity")
     expected_role = InputArtifactRole if isinstance(value, InputArtifactReference) else OutputArtifactRole
-    if not isinstance(value.role, expected_role):
-        raise ProvenanceSchemaError(f"{field}.role must be a {expected_role.__name__}")
-    if not isinstance(value.digest_algorithm, ArtifactDigestAlgorithm):
+    _validate_artifact_location(value, field, expected_role)
+    _validate_digest(value.digest_algorithm, value.digest_value, field)
+
+
+def _validate_digest(algorithm: Any, digest_value: Any, field: str) -> None:
+    if not isinstance(algorithm, ArtifactDigestAlgorithm):
         raise ProvenanceSchemaError(f"{field}.digest_algorithm must be an ArtifactDigestAlgorithm")
-    digest = _nonempty_string(value.digest_value, f"{field}.digest_value")
-    expected_length = _DIGEST_HEX_LENGTH[value.digest_algorithm]
+    digest = _nonempty_string(digest_value, f"{field}.digest_value")
+    expected_length = _DIGEST_HEX_LENGTH[algorithm]
     if len(digest) != expected_length or any(character not in "0123456789abcdef" for character in digest):
         raise ProvenanceSchemaError(
-            f"{field}.digest_value must be {expected_length} lowercase hexadecimal characters "
-            f"for {value.digest_algorithm.value}"
+            f"{field}.digest_value must be {expected_length} lowercase hexadecimal characters for {algorithm.value}"
         )
+
+
+def _validate_artifact_location(value: Any, field: str, role_type: Any) -> None:
+    _nonempty_string(value.identity, f"{field}.identity")
+    if not isinstance(value.role, role_type):
+        raise ProvenanceSchemaError(f"{field}.role must be a {role_type.__name__}")
     source = _optional_string(value.source, f"{field}.source")
     revision = _optional_string(value.revision, f"{field}.revision")
     if type(value.source_is_immutable) is not bool:
@@ -759,7 +849,7 @@ def _validate_artifact_reference(value: Any, field: str) -> None:
         raise ProvenanceSchemaError(f"{field}.source_is_immutable requires source")
     if source is not None and revision is None and not value.source_is_immutable:
         raise ProvenanceSchemaError(f"{field}.source requires a revision unless it is explicitly immutable")
-    metadata = _json_object(value.metadata, f"{field}.metadata")
+    metadata = _json_object(_thaw_json(value.metadata), f"{field}.metadata")
     object.__setattr__(value, "metadata", _freeze_json(metadata))
 
 
@@ -835,6 +925,24 @@ def _artifact_references(
     if duplicates:
         raise ProvenanceSchemaError(f"artifact identities must be unique: {', '.join(duplicates)}")
     return tuple(input_artifacts), tuple(output_artifacts)
+
+
+def _output_artifact_declarations(
+    input_artifacts: Any, output_artifacts: Any
+) -> tuple[OutputArtifactDeclaration, ...]:
+    if not isinstance(output_artifacts, (list, tuple)) or not all(
+        isinstance(item, OutputArtifactDeclaration) for item in output_artifacts
+    ):
+        raise ProvenanceSchemaError("output_artifacts must contain only OutputArtifactDeclaration values")
+    if not isinstance(input_artifacts, (list, tuple)) or not all(
+        isinstance(item, InputArtifactReference) for item in input_artifacts
+    ):
+        raise ProvenanceSchemaError("input_artifacts must contain only InputArtifactReference values")
+    identities = [item.identity for item in (*input_artifacts, *output_artifacts)]
+    duplicates = sorted({identity for identity in identities if identities.count(identity) > 1})
+    if duplicates:
+        raise ProvenanceSchemaError(f"artifact identities must be unique: {', '.join(duplicates)}")
+    return tuple(output_artifacts)
 
 
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:
@@ -1012,6 +1120,8 @@ __all__ = [
     "InputArtifactReference",
     "InputArtifactRole",
     "OutputArtifactReference",
+    "OutputArtifactDeclaration",
+    "OutputArtifactDigest",
     "OutputArtifactRole",
     "ProvenanceSchemaError",
     "WORKFLOW_PROVENANCE_SCHEMA_REVISION",
