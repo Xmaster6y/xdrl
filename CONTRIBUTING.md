@@ -59,3 +59,26 @@ fork in the generated universal lock before accepting the refresh.
 ## Branches
 
 Make a branch before making a pull request to `develop`.
+
+## Scientific reproduction notebooks
+
+Scientific reproductions are separate from task-oriented tutorials. Give each
+paper exactly one primary notebook under `docs/source/reproductions/`, add its
+gallery entry to `docs/source/reproductions/index.rst`, and do not move or reuse
+a notebook from `docs/source/notebooks/` as the deliverable. Follow the notebook
+header and evidence-status contract documented on the
+[Reproductions page](https://xdrl.readthedocs.io/en/latest/reproductions/).
+
+Keep paper-specific orchestration and analysis in the primary notebook or in a
+small support module beside it. Changes to reusable XDRL behavior belong under
+`src/` and require their own focused feature or design issue. Small,
+redistributable fixtures may be committed beside the notebook. Models,
+datasets, environment installations, and other large or externally licensed
+assets must stay outside Git: document their source, license, expected local
+path, version or revision, and checksum in the notebook instead. Publish durable
+result artifacts at a stable external location and link them from the notebook
+and gallery; the ignored local `outputs/` directory is only a working area.
+
+Run `just docs` after adding a reproduction. The build renders notebooks without
+executing them, so a successful documentation build is not smoke-execution or
+scientific-result evidence.

@@ -11,6 +11,7 @@
     start
     features
     tutorials
+    Reproductions <reproductions/index>
     API Reference <api/index>
     About <about>
 
@@ -51,6 +52,12 @@
 
                 Tutorials
 
+          .. button-ref:: reproductions/index
+            :color: primary
+            :outline:
+
+                Reproductions
+
           .. button-ref:: api/index
             :color: primary
             :outline:
@@ -90,3 +97,13 @@
          <i class="fa-solid fa-book-open fa-2x"></i>
          <h5>Tutorials</h5>
          <p>Notebook-first examples.</p>
+
+   .. grid-item-card::
+      :link: reproductions/index
+      :class-card: surface
+
+      .. raw:: html
+
+         <i class="fa-solid fa-flask fa-2x"></i>
+         <h5>Reproductions</h5>
+         <p>Evidence-tracked scientific reproductions.</p>
