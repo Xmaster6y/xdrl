@@ -1,10 +1,6 @@
 Tutorials
 =========
 
-Tutorials are task-oriented examples for learning XDRL. They are not scientific
-reproduction deliverables. See :doc:`reproductions/index` for paper-specific
-notebooks and their evidence status.
-
 .. grid:: 1 2 2 2
    :gutter: 3
 
