@@ -1,23 +1,41 @@
-Getting Started
-===============
+Quickstart
+==========
 
-Create an interaction around one local, synchronous TensorDict module call.
+.. code-block:: bash
 
-.. grid:: 1 1 1 1
+   pip install xdrl
 
-   .. grid-item-card::
-      :link: notebooks/quickstart.ipynb
-      :class-card: surface
+.. code-block:: python
 
-      .. raw:: html
+   import torch
+   from tensordict import TensorDict
+   from tensordict.nn import TensorDictModule
+   from xdrl import (
+       BatchSemantics,
+       KeyPresence,
+       KeyRole,
+       KeySchema,
+       ModelRole,
+       TensorDictSchema,
+       validate_module,
+   )
 
-         <i class="fa-solid fa-play fa-2x"></i>
-         <h5>Quickstart notebook</h5>
-         <p>Declare a policy interaction and run an activation-caching workflow.</p>
+   batch = TensorDict({"observation": torch.randn(8, 4)}, batch_size=[8])
+   policy = TensorDictModule(
+       torch.nn.Linear(4, 2),
+       in_keys=["observation"],
+       out_keys=["action"],
+   )
+   policy.role = ModelRole.ACTOR
+   batch_dims = BatchSemantics(("env",))
+   policy.input_schema = TensorDictSchema(
+       (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),),
+       batch_dims,
+   )
+   policy.output_schema = TensorDictSchema(
+       (KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),),
+       batch_dims,
+   )
 
-Compiled, remote, distributed, and worker-copied modules are unsupported.
-
-.. toctree::
-   :hidden:
-
-   notebooks/quickstart.ipynb
+   result = validate_module(policy, batch)
+   assert result["action"].shape == (8, 2)

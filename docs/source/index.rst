@@ -8,11 +8,9 @@
     :maxdepth: 1
     :hidden:
 
-    start
-    features
-    tutorials
+    Getting Started <start>
+    Tutorials <tutorials>
     API Reference <api/index>
-    About <about>
 
 .. grid:: 1 1 2 2
     :class-container: hero
@@ -58,35 +56,32 @@
                 API Reference
 
 
-.. grid:: 1 2 3 3
+.. grid:: 1 1 3 3
    :gutter: 3
 
-   .. grid-item-card::
+   .. grid-item-card:: Getting Started
       :link: start
+      :link-type: doc
       :class-card: surface
 
-      .. raw:: html
+      :octicon:`play;2em;sd-text-primary`
 
-         <i class="fa-solid fa-rocket fa-2x"></i>
-         <h5>Getting Started</h5>
-         <p>Run one typed model interaction.</p>
+      Run one typed model interaction.
 
-   .. grid-item-card::
-      :link: features
-      :class-card: surface
-
-      .. raw:: html
-
-         <i class="fa-solid fa-shield-halved fa-2x"></i>
-         <h5>Features</h5>
-         <p>Contracts, workflows, and provenance.</p>
-
-   .. grid-item-card::
+   .. grid-item-card:: Tutorials
       :link: tutorials
+      :link-type: doc
       :class-card: surface
 
-      .. raw:: html
+      :octicon:`mortar-board;2em;sd-text-primary`
 
-         <i class="fa-solid fa-book-open fa-2x"></i>
-         <h5>Tutorials</h5>
-         <p>Notebook-first examples.</p>
+      Browse tutorials and reproductions.
+
+   .. grid-item-card:: API Reference
+      :link: api/index
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`code-square;2em;sd-text-primary`
+
+      Browse generated modules and types.

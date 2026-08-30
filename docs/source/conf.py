@@ -91,8 +91,6 @@ html_theme_options = {
         "version_match": version_match,
     },
 }
-html_sidebars = {"about": [], "start": []}
-
 html_context = {"default_mode": "auto"}
 
 html_css_files = [
@@ -101,7 +99,8 @@ html_css_files = [
 ]
 
 # Nbsphinx
-nbsphinx_execute = "never"
+nbsphinx_execute = "always"
+nbsphinx_timeout = 60
 
 # Autoapi
 autoapi_dirs = ["../../src"]

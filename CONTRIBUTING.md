@@ -59,3 +59,11 @@ fork in the generated universal lock before accepting the refresh.
 ## Branches
 
 Make a branch before making a pull request to `develop`.
+
+## Scientific reproduction notebooks
+
+- One primary notebook per paper in `docs/source/reproductions/`; do not reuse tutorials.
+- Header: paper/code links, revisions, execution mode, assets, claim limits.
+- Report smoke, artifacts, reference agreement, and paper claims separately.
+- Keep paper-specific code beside the notebook and large assets outside Git.
+- Add its card and toctree entry to `docs/source/tutorials.rst`; run `just docs`.
