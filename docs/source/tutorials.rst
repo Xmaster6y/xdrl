@@ -26,7 +26,7 @@ Tutorials
       Replace a declared activation with TDHook.
 
    .. grid-item-card:: Workflow evidence
-      :link: notebooks/quickstart
+      :link: notebooks/workflow-evidence
       :link-type: doc
       :class-card: surface
 
@@ -39,6 +39,7 @@ Tutorials
 
    notebooks/collection.ipynb
    notebooks/intervention.ipynb
+   notebooks/workflow-evidence.ipynb
 
 Reproductions
 -------------

@@ -8,7 +8,7 @@
     :maxdepth: 1
     :hidden:
 
-    Getting Started <notebooks/quickstart>
+    Getting Started <start>
     Notebooks <tutorials>
     API Reference <api/index>
 
@@ -37,7 +37,7 @@
 
         .. div:: button-group
 
-          .. button-ref:: notebooks/quickstart
+          .. button-ref:: start
             :color: primary
             :shadow:
 
@@ -60,7 +60,7 @@
    :gutter: 3
 
    .. grid-item-card:: Getting Started
-      :link: notebooks/quickstart
+      :link: start
       :link-type: doc
       :class-card: surface
 
