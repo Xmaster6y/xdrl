@@ -31,8 +31,7 @@ conformance and documentation gates.
 
 ## Documentation
 
-- [Tutorials](https://xdrl.readthedocs.io/en/latest/tutorials.html)
-- [Reproductions](https://xdrl.readthedocs.io/en/latest/reproductions/)
+- [Notebooks](https://xdrl.readthedocs.io/en/latest/tutorials.html)
 - [API Reference](https://xdrl.readthedocs.io/en/latest/api/index.html)
 
 ## License

@@ -66,4 +66,4 @@ Make a branch before making a pull request to `develop`.
 - Header: paper/code links, revisions, execution mode, assets, claim limits.
 - Report smoke, artifacts, reference agreement, and paper claims separately.
 - Keep paper-specific code beside the notebook and large assets outside Git.
-- Link the notebook from `docs/source/reproductions/index.rst`; run `just docs`.
+- Add its card and toctree entry to `docs/source/tutorials.rst`; run `just docs`.

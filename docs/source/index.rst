@@ -9,8 +9,7 @@
     :hidden:
 
     Getting Started <notebooks/quickstart>
-    Tutorials <tutorials>
-    Reproductions <reproductions/index>
+    Notebooks <tutorials>
     API Reference <api/index>
 
 .. grid:: 1 1 2 2
@@ -48,7 +47,7 @@
             :color: primary
             :outline:
 
-                Tutorials
+                Notebooks
 
           .. button-ref:: api/index
             :color: primary
@@ -69,14 +68,14 @@
 
       Run one typed model interaction.
 
-   .. grid-item-card:: Tutorials
+   .. grid-item-card:: Notebooks
       :link: tutorials
       :link-type: doc
       :class-card: surface
 
       :octicon:`mortar-board;2em;sd-text-primary`
 
-      Learn from maintained notebooks.
+      Browse tutorials and reproductions.
 
    .. grid-item-card:: API Reference
       :link: api/index
