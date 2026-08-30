@@ -14,7 +14,7 @@ Tutorials
 
       :octicon:`sync;2em;sd-text-primary`
 
-      Use an interaction as a SyncDataCollector policy.
+      Run a typed policy in TorchRL's local collector.
 
    .. grid-item-card:: Intervention
       :link: notebooks/intervention
@@ -23,7 +23,7 @@ Tutorials
 
       :octicon:`tools;2em;sd-text-primary`
 
-      Replace a declared activation with TDHook.
+      Compare baseline and intervened policy actions.
 
    .. grid-item-card:: Workflow evidence
       :link: notebooks/workflow-evidence
@@ -32,7 +32,7 @@ Tutorials
 
       :octicon:`pulse;2em;sd-text-primary`
 
-      Capture an activation and inspect model-pass provenance.
+      Cache an activation and inspect execution provenance.
 
 .. toctree::
    :hidden:

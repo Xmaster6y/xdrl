@@ -99,7 +99,8 @@ html_css_files = [
 ]
 
 # Nbsphinx
-nbsphinx_execute = "never"
+nbsphinx_execute = "always"
+nbsphinx_timeout = 60
 
 # Autoapi
 autoapi_dirs = ["../../src"]
