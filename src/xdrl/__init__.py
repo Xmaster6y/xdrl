@@ -53,6 +53,13 @@ from xdrl.observations import (
     TensorRetention,
 )
 from xdrl.provenance import (
+    ArtifactDigestAlgorithm,
+    InputArtifactReference,
+    InputArtifactRole,
+    OutputArtifactDeclaration,
+    OutputArtifactDigest,
+    OutputArtifactReference,
+    OutputArtifactRole,
     WORKFLOW_PROVENANCE_SCHEMA_REVISION,
     ProvenanceSchemaError,
     WorkflowCompatibilityEvidence,
@@ -60,7 +67,7 @@ from xdrl.provenance import (
     WorkflowPlanEvidence,
     WorkflowProvenance,
 )
-from xdrl.tdhook import TDHookWorkflowResult, TDHookWorkflowRunner
+from xdrl.tdhook import OutputArtifactResolver, TDHookWorkflowResult, TDHookWorkflowRunner
 from xdrl.types import (
     BatchSemantics,
     ContractModule,
@@ -82,6 +89,7 @@ except PackageNotFoundError:
 
 __all__ = [
     "AgentSelector",
+    "ArtifactDigestAlgorithm",
     "BatchSemantics",
     "CompatibilityBoundaryError",
     "ConformanceCheck",
@@ -98,6 +106,8 @@ __all__ = [
     "InterventionTarget",
     "InterventionTiming",
     "InterventionValidationError",
+    "InputArtifactReference",
+    "InputArtifactRole",
     "KeyPresence",
     "KeyRole",
     "KeySchema",
@@ -108,6 +118,11 @@ __all__ = [
     "ObservationKind",
     "ObservationRecord",
     "ObservationTrace",
+    "OutputArtifactDeclaration",
+    "OutputArtifactDigest",
+    "OutputArtifactReference",
+    "OutputArtifactResolver",
+    "OutputArtifactRole",
     "PRIVATE_UPSTREAM_APIS",
     "PrivateAPIUsage",
     "ProvenanceSchemaError",
