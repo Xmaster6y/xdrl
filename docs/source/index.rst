@@ -9,7 +9,7 @@
     :hidden:
 
     Getting Started <start>
-    Notebooks <tutorials>
+    Tutorials <tutorials>
     API Reference <api/index>
 
 .. grid:: 1 1 2 2
@@ -47,7 +47,7 @@
             :color: primary
             :outline:
 
-                Notebooks
+                Tutorials
 
           .. button-ref:: api/index
             :color: primary
@@ -68,7 +68,7 @@
 
       Run one typed model interaction.
 
-   .. grid-item-card:: Notebooks
+   .. grid-item-card:: Tutorials
       :link: tutorials
       :link-type: doc
       :class-card: surface

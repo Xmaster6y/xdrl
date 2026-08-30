@@ -68,7 +68,7 @@ conformance and documentation gates.
 ## Documentation
 
 - [Getting Started](https://xdrl.readthedocs.io/en/latest/start.html)
-- [Notebooks](https://xdrl.readthedocs.io/en/latest/tutorials.html)
+- [Tutorials](https://xdrl.readthedocs.io/en/latest/tutorials.html)
 - [API Reference](https://xdrl.readthedocs.io/en/latest/api/index.html)
 
 ## License
