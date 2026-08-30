@@ -62,14 +62,8 @@ Make a branch before making a pull request to `develop`.
 
 ## Scientific reproduction notebooks
 
-Scientific reproductions are separate from task-oriented tutorials. Give each
-paper exactly one primary notebook under `docs/source/reproductions/`, add its
-gallery entry to `docs/source/reproductions/index.rst`, and do not move or reuse
-a tutorial notebook. Follow the compact header and status contract on the
-[Reproductions page](https://xdrl.readthedocs.io/en/latest/reproductions/).
-
-Keep paper-specific code beside the notebook; reusable library code belongs in
-`src/`. Keep large or licensed assets outside Git and record their source,
-revision, checksum, and local path in the notebook. Link durable artifacts from
-the gallery, then run `just docs`; documentation rendering is not experiment
-evidence.
+- One primary notebook per paper in `docs/source/reproductions/`; do not reuse tutorials.
+- Header: paper/code links, revisions, execution mode, assets, claim limits.
+- Report smoke, artifacts, reference agreement, and paper claims separately.
+- Keep paper-specific code beside the notebook and large assets outside Git.
+- Link the notebook from `docs/source/reproductions/index.rst`; run `just docs`.
