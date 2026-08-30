@@ -4,35 +4,32 @@ Tutorials
 .. grid:: 1 2 2 2
    :gutter: 3
 
-   .. grid-item-card::
-      :link: notebooks/collection.ipynb
+   .. grid-item-card:: Local collection
+      :link: notebooks/collection
+      :link-type: doc
       :class-card: surface
 
-      .. raw:: html
+      :octicon:`sync;2em;sd-text-primary`
 
-         <i class="fa-solid fa-robot fa-2x"></i>
-         <h5>Local collection</h5>
-         <p>Use an interaction as a SyncDataCollector policy.</p>
+      Use an interaction as a SyncDataCollector policy.
 
-   .. grid-item-card::
-      :link: notebooks/intervention.ipynb
+   .. grid-item-card:: Intervention
+      :link: notebooks/intervention
+      :link-type: doc
       :class-card: surface
 
-      .. raw:: html
+      :octicon:`tools;2em;sd-text-primary`
 
-         <i class="fa-solid fa-sliders fa-2x"></i>
-         <h5>Intervention</h5>
-         <p>Replace a declared activation with TDHook.</p>
+      Replace a declared activation with TDHook.
 
-   .. grid-item-card::
-      :link: notebooks/quickstart.ipynb
+   .. grid-item-card:: Workflow evidence
+      :link: notebooks/quickstart
+      :link-type: doc
       :class-card: surface
 
-      .. raw:: html
+      :octicon:`pulse;2em;sd-text-primary`
 
-         <i class="fa-solid fa-magnifying-glass-chart fa-2x"></i>
-         <h5>Workflow evidence</h5>
-         <p>Capture an activation and inspect model-pass provenance.</p>
+      Capture an activation and inspect model-pass provenance.
 
 .. toctree::
    :hidden:
