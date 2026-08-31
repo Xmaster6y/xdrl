@@ -112,12 +112,12 @@ class TDHookWorkflowPairManifest:
         ):
             if not isinstance(value, str) or not value:
                 raise ValueError(f"{field} must be a non-empty string")
+        if not all(isinstance(item, WorkflowStepDifference) for item in self.changed_steps):
+            raise TypeError("changed_steps must contain WorkflowStepDifference values")
         if tuple(item.index for item in self.changed_steps) != tuple(
             sorted({item.index for item in self.changed_steps})
         ):
             raise ValueError("paired workflow changed step indices must be unique and sorted")
-        if not all(isinstance(item, WorkflowStepDifference) for item in self.changed_steps):
-            raise TypeError("changed_steps must contain WorkflowStepDifference values")
         if not isinstance(self.baseline, WorkflowArmReference) or not isinstance(
             self.intervention, WorkflowArmReference
         ):

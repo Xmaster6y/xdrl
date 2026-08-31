@@ -22,6 +22,8 @@ from xdrl.tdhook import (
     PairedWorkflowValidationError,
     TDHookWorkflowPairManifest,
     TDHookWorkflowRunner,
+    WorkflowArmReference,
+    WorkflowStepDifference,
 )
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
@@ -62,6 +64,27 @@ def _runner(*, stochastic: bool = False) -> TDHookWorkflowRunner:
 
 def _cache() -> Workflow:
     return Workflow(ActivationCaching("module", cache_key=("activations", "head")))
+
+
+def _arm_reference() -> WorkflowArmReference:
+    return WorkflowArmReference("a" * 64, (), ())
+
+
+def _manifest(**overrides: object) -> TDHookWorkflowPairManifest:
+    values = {
+        "schema_revision": 1,
+        "pair_id": "pair:test",
+        "interaction_id": "interaction:test",
+        "model_id": "model:test",
+        "checkpoint_id": "checkpoint:test",
+        "changed_steps": (),
+        "baseline": _arm_reference(),
+        "intervention": _arm_reference(),
+        "matched_rng_sources": ("torch_cpu",),
+        "unsupported_randomness_sources": ("python_random",),
+    }
+    values.update(overrides)
+    return TDHookWorkflowPairManifest(**values)  # type: ignore[arg-type]
 
 
 def _resolve_artifacts(
@@ -254,3 +277,134 @@ def test_pair_rejects_undeclared_differences_and_incompatible_contracts_before_e
         )
 
     assert not runner.interaction.events
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("factory", "message"),
+    [
+        (lambda: WorkflowStepDifference(-1, "baseline", "intervention"), "non-negative"),
+        (lambda: WorkflowStepDifference(0, "same", "same"), "distinct"),
+        (lambda: WorkflowArmReference("invalid", (), ()), "SHA-256"),
+        (lambda: WorkflowArmReference("a" * 64, [], ()), "tuple of non-empty"),  # type: ignore[arg-type]
+        (lambda: WorkflowArmReference("a" * 64, ("duplicate", "duplicate"), ()), "unique"),
+        (lambda: _manifest(schema_revision=2), "schema revision"),
+        (lambda: _manifest(pair_id=""), "non-empty string"),
+        (
+            lambda: _manifest(
+                changed_steps=(
+                    WorkflowStepDifference(1, "a", "b"),
+                    WorkflowStepDifference(0, "c", "d"),
+                )
+            ),
+            "unique and sorted",
+        ),
+        (lambda: _manifest(changed_steps=(object(),)), "WorkflowStepDifference"),
+        (lambda: _manifest(baseline=object()), "WorkflowArmReference"),
+        (lambda: _manifest(matched_rng_sources=[]), "tuple of non-empty"),
+        (lambda: _manifest(matched_rng_sources=("torch_cpu", "torch_cpu")), "unique"),
+        (lambda: _manifest(interpretation="causal"), "cannot assign a causal"),
+    ],
+)
+def test_pair_manifest_rejects_invalid_values(factory: object, message: str) -> None:
+    with pytest.raises((TypeError, ValueError), match=message):
+        factory()  # type: ignore[operator]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ([], "must be an object"),
+        ({}, "missing or unknown fields"),
+        ({**_manifest().to_dict(), "changed_steps": "invalid"}, "changed_steps must be an array"),
+        ({**_manifest().to_dict(), "baseline": {}}, "baseline arm reference"),
+    ],
+)
+def test_pair_manifest_decoder_rejects_invalid_payloads(payload: object, message: str) -> None:
+    with pytest.raises((TypeError, ValueError), match=message):
+        TDHookWorkflowPairManifest.from_dict(payload)  # type: ignore[arg-type]
+
+
+@pytest.mark.integration
+def test_pair_manifest_json_decoder_requires_an_object() -> None:
+    with pytest.raises(TypeError, match="JSON must contain an object"):
+        TDHookWorkflowPairManifest.from_json("[]")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("declared", [[], (0, 0)])
+def test_pair_rejects_invalid_difference_declarations(declared: object) -> None:
+    runner = _runner()
+    with pytest.raises(PairedWorkflowValidationError, match="tuple of non-negative|unique and sorted"):
+        runner.run_paired(
+            _cache(),
+            _cache(),
+            runner.interaction.representative_input,
+            pair_id="pair:invalid-differences",
+            code_revision="test-revision",
+            declared_workflow_differences=declared,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.integration
+def test_pair_rejects_missing_identity_contract_drift_and_a_different_module() -> None:
+    runner = _runner()
+    data = runner.interaction.representative_input
+
+    with pytest.raises(PairedWorkflowValidationError, match="pair_id"):
+        runner.run_paired(_cache(), _cache(), data, pair_id="", code_revision="test-revision")
+
+    missing_identity = TDHookWorkflowRunner(
+        RuntimeInteractionContext(
+            replace(runner.interaction.contract, model_id=None),
+            runner.interaction.module,
+            data,
+        )
+    )
+    with pytest.raises(PairedWorkflowValidationError, match="explicit model and checkpoint"):
+        missing_identity.run_paired(_cache(), _cache(), data, pair_id="pair:missing", code_revision="test-revision")
+
+    drifted = TDHookWorkflowRunner(
+        RuntimeInteractionContext(
+            replace(runner.interaction.contract, module_training=True),
+            runner.interaction.module,
+            data,
+        )
+    )
+    with pytest.raises(PairedWorkflowValidationError, match="identical interaction contracts"):
+        runner.run_paired(
+            _cache(),
+            _cache(),
+            data,
+            pair_id="pair:drift",
+            code_revision="test-revision",
+            intervention_runner=drifted,
+        )
+
+    different_module = _runner()
+    with pytest.raises(PairedWorkflowValidationError, match="same module instance"):
+        runner.run_paired(
+            _cache(),
+            _cache(),
+            data,
+            pair_id="pair:different-module",
+            code_revision="test-revision",
+            intervention_runner=different_module,
+        )
+
+
+@pytest.mark.integration
+def test_pair_rejects_unshared_tensordict_operators() -> None:
+    runner = _runner()
+    baseline_operator = TensorDictModule(torch.nn.Identity(), in_keys=["observation"], out_keys=["observation"])
+    intervention_operator = TensorDictModule(torch.nn.Identity(), in_keys=["observation"], out_keys=["observation"])
+
+    with pytest.raises(PairedWorkflowValidationError, match="same instances"):
+        runner.run_paired(
+            Workflow(baseline_operator, ActivationCaching("module")),
+            Workflow(intervention_operator, ActivationCaching("module")),
+            runner.interaction.representative_input,
+            pair_id="pair:operators",
+            code_revision="test-revision",
+        )
