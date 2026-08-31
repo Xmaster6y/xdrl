@@ -9,6 +9,7 @@
     :hidden:
 
     Getting Started <start>
+    Repeated internal computation <internal-computation>
     Tutorials <tutorials>
     API Reference <api/index>
 

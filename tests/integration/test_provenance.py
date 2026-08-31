@@ -265,11 +265,72 @@ def test_workflow_provenance_decodes_recurrent_and_multi_agent_contract_evidence
         "n_agents": 2,
         "target": {"role": "actor", "selector": {"group": "agents", "agents": [0, "blue"]}},
     }
+    contract["internal_computation"] = {
+        "axes": [
+            {"name": "tick", "coordinates": [0, 1]},
+            {"name": "layer", "coordinates": ["lower", "upper"]},
+        ],
+        "occurrences": [
+            {"module_path": "cell", "call_index": 0, "coordinates": [0, "lower"]},
+            {"module_path": "cell", "call_index": 1, "coordinates": [0, "upper"]},
+            {"module_path": "cell", "call_index": 2, "coordinates": [1, "lower"]},
+            {"module_path": "cell", "call_index": 3, "coordinates": [1, "upper"]},
+        ],
+        "recurrent_state_keys": [["state"], ["next", "state"]],
+    }
 
     restored = WorkflowProvenance.from_dict(payload)
+    round_tripped = WorkflowProvenance.from_json(restored.to_json())
 
     assert restored.interaction_contract["recurrent"]["collector_mode"] == "direct"
     assert restored.interaction_contract["multi_agent"]["n_agents"] == 2
+    assert restored.interaction_contract["internal_computation"]["axes"][0]["name"] == "tick"
+    assert round_tripped == restored
+
+
+@pytest.mark.integration
+def test_workflow_provenance_rejects_ambiguous_internal_occurrence_mapping() -> None:
+    payload = _run().to_dict()
+    contract = payload["interaction_contract"]
+    contract["input_schema"]["keys"].append(
+        {
+            "path": ["state"],
+            "role": "state",
+            "presence": "required",
+            "feature_shape": None,
+            "spec_type": None,
+            "spec_constraints": None,
+        }
+    )
+    contract["output_schema"]["keys"].append(
+        {
+            "path": ["next", "state"],
+            "role": "state",
+            "presence": "produced",
+            "feature_shape": None,
+            "spec_type": None,
+            "spec_constraints": None,
+        }
+    )
+    contract["recurrent"] = {
+        "transitions": [{"input_key": ["state"], "output_key": ["next", "state"]}],
+        "reset_keys": [],
+        "sequence_dimension": None,
+        "burn_in": 0,
+        "truncated_window": None,
+        "collector_mode": "direct",
+    }
+    contract["internal_computation"] = {
+        "axes": [{"name": "tick", "coordinates": [0, 1]}],
+        "occurrences": [
+            {"module_path": "cell", "call_index": 0, "coordinates": [0]},
+            {"module_path": "cell", "call_index": 0, "coordinates": [1]},
+        ],
+        "recurrent_state_keys": [["state"]],
+    }
+
+    with pytest.raises(ProvenanceSchemaError, match="raw hook call cannot identify multiple"):
+        WorkflowProvenance.from_dict(payload)
 
 
 @pytest.mark.integration

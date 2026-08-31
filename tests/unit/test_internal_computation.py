@@ -1,0 +1,201 @@
+import pytest
+import torch
+from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
+from tdhook.latent import ActivationCaching
+from tdhook.workflow import Workflow
+
+from xdrl.interactions import (
+    InteractionContract,
+    InteractionPhase,
+    InternalComputationAxis,
+    InternalComputationSemantics,
+    InternalOccurrence,
+    InternalOccurrenceSelection,
+    OccurrenceIdentityError,
+    RecurrentSemantics,
+    RecurrentStateTransition,
+    RuntimeInteractionContext,
+)
+from xdrl.observations import ObservationTrace, RetentionPolicy, TensorRetention
+from xdrl.tdhook import TDHookWorkflowRunner
+from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
+
+
+class RepeatedConvLSTMFixture(torch.nn.Module):
+    """Tiny shared-cell fixture; it tests call identity, not ConvLSTM fidelity."""
+
+    def __init__(self, ticks: int = 2) -> None:
+        super().__init__()
+        self.ticks = ticks
+        self.cell = torch.nn.Conv2d(1, 1, kernel_size=1, bias=False)
+        torch.nn.init.constant_(self.cell.weight, 0.5)
+
+    def forward(self, observation: torch.Tensor, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        hidden = state + observation
+        for _tick in range(self.ticks):
+            hidden = self.cell(hidden)  # semantic layer 0
+            hidden = self.cell(hidden)  # semantic layer 1, same module instance
+        return hidden, hidden.mean(dim=(-2, -1))
+
+
+def _semantics() -> InternalComputationSemantics:
+    return InternalComputationSemantics(
+        axes=(
+            InternalComputationAxis("tick", (0, 1)),
+            InternalComputationAxis("layer", (0, 1)),
+        ),
+        occurrences=tuple(
+            InternalOccurrence("module.cell", call_index, (tick, layer))
+            for call_index, (tick, layer) in enumerate(((0, 0), (0, 1), (1, 0), (1, 1)))
+        ),
+        recurrent_state_keys=(("state",), ("next", "state")),
+    )
+
+
+def _interaction(*, ticks: int = 2) -> RuntimeInteractionContext:
+    batch_semantics = BatchSemantics(("env",))
+    inputs = TensorDictSchema(
+        (
+            KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),
+            KeySchema("state", KeyRole.STATE, KeyPresence.REQUIRED),
+            KeySchema("is_init", KeyRole.TERMINATION, KeyPresence.REQUIRED),
+        ),
+        batch_semantics,
+    )
+    outputs = TensorDictSchema(
+        (
+            KeySchema(("next", "state"), KeyRole.STATE, KeyPresence.PRODUCED),
+            KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),
+        ),
+        batch_semantics,
+    )
+    contract = InteractionContract(
+        identity="repeated-convlstm:0",
+        role=ModelRole.ACTOR,
+        phase=InteractionPhase.EVALUATION,
+        module_path="policy",
+        input_schema=inputs,
+        output_schema=outputs,
+        recurrent=RecurrentSemantics(
+            transitions=(RecurrentStateTransition(("state",), ("next", "state")),),
+            reset_keys=(("is_init",),),
+        ),
+        internal_computation=_semantics(),
+    )
+    module = TensorDictModule(
+        RepeatedConvLSTMFixture(ticks),
+        in_keys=["observation", "state"],
+        out_keys=[("next", "state"), "action"],
+    )
+    batch = TensorDict(
+        {
+            "observation": torch.ones(2, 1, 2, 2),
+            "state": torch.zeros(2, 1, 2, 2),
+            "is_init": torch.zeros(2, 1, dtype=torch.bool),
+        },
+        batch_size=[2],
+    )
+    trace = ObservationTrace(RetentionPolicy(tensor=TensorRetention.DETACHED))
+    return RuntimeInteractionContext(contract, module, batch, observations=trace)
+
+
+def test_reused_module_records_exact_layer_tick_occurrences_without_collapsing() -> None:
+    interaction = _interaction()
+    expected = interaction.module(interaction.representative_input.clone())["next", "state"].clone()
+
+    with interaction, interaction.observe_internal_computation():
+        result = interaction.invoke(interaction.representative_input.clone())
+
+    internal_records = [record for record in interaction.observations.records if record.raw_call_index is not None]
+    assert result["next", "state"].shape == (2, 1, 2, 2)
+    assert torch.equal(result["next", "state"], expected)
+    assert [record.raw_call_index for record in internal_records] == [0, 1, 2, 3]
+    assert [record.internal_coordinates for record in internal_records] == [
+        (("tick", 0), ("layer", 0)),
+        (("tick", 0), ("layer", 1)),
+        (("tick", 1), ("layer", 0)),
+        (("tick", 1), ("layer", 1)),
+    ]
+    assert len({id(record.payload) for record in internal_records}) == 4
+
+
+def test_semantic_selection_resolves_to_exact_raw_calls() -> None:
+    semantics = _semantics()
+
+    selected = semantics.select(InternalOccurrenceSelection((("tick", 1),)))
+
+    assert [(item.module_path, item.call_index) for item in selected] == [
+        ("module.cell", 2),
+        ("module.cell", 3),
+    ]
+    with pytest.raises(OccurrenceIdentityError, match="unknown internal-computation axes"):
+        semantics.select(InternalOccurrenceSelection((("environment_time", 0),)))
+
+
+def test_ambiguous_or_changed_call_mapping_fails_and_hooks_are_cleaned_up() -> None:
+    interaction = _interaction(ticks=3)
+    cell = interaction.module.get_submodule("module.cell")
+    original_hooks = tuple(cell._forward_hooks)
+
+    with pytest.raises(OccurrenceIdentityError, match="undeclared internal occurrence"):
+        with interaction, interaction.observe_internal_computation():
+            interaction.invoke(interaction.representative_input.clone())
+
+    assert tuple(cell._forward_hooks) == original_hooks
+
+
+def test_tdhook_workflows_fail_before_planning_without_occurrence_evidence() -> None:
+    interaction = _interaction()
+    workflow = Workflow(ActivationCaching("module.cell", cache_key=("activations", "cell")))
+
+    with pytest.raises(RuntimeError, match="occurrence-selector.*cannot guarantee identity"):
+        TDHookWorkflowRunner(interaction).plan(workflow, interaction.representative_input.clone())
+
+
+def test_internal_axes_cannot_relabel_environment_time_or_unrelated_state() -> None:
+    interaction = _interaction()
+    contract = interaction.contract
+
+    with pytest.raises(ValueError, match="distinct from environment/sequence time"):
+        recurrent_with_time = RecurrentSemantics(
+            transitions=contract.recurrent.transitions,
+            reset_keys=contract.recurrent.reset_keys,
+            sequence_dimension="env",
+        )
+        internal_with_environment_axis = InternalComputationSemantics(
+            axes=(InternalComputationAxis("env", (0, 1)),),
+            occurrences=(
+                InternalOccurrence("module.cell", 0, (0,)),
+                InternalOccurrence("module.cell", 1, (1,)),
+            ),
+            recurrent_state_keys=(("state",),),
+        )
+        InteractionContract(
+            identity=contract.identity,
+            role=contract.role,
+            phase=contract.phase,
+            module_path=contract.module_path,
+            input_schema=contract.input_schema,
+            output_schema=contract.output_schema,
+            time_dimension="env",
+            recurrent=recurrent_with_time,
+            internal_computation=internal_with_environment_axis,
+        )
+
+    invalid = InternalComputationSemantics(
+        axes=(InternalComputationAxis("tick", (0,)),),
+        occurrences=(InternalOccurrence("module.cell", 0, (0,)),),
+        recurrent_state_keys=(("other",),),
+    )
+    with pytest.raises(ValueError, match="outside the recurrent state transitions"):
+        InteractionContract(
+            identity=contract.identity,
+            role=contract.role,
+            phase=contract.phase,
+            module_path=contract.module_path,
+            input_schema=contract.input_schema,
+            output_schema=contract.output_schema,
+            recurrent=contract.recurrent,
+            internal_computation=invalid,
+        )

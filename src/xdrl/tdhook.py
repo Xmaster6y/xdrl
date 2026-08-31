@@ -462,6 +462,11 @@ class TDHookWorkflowRunner:
             raise TypeError(f"workflow data must be a TensorDict, got {type(data).__name__}")
         if _has_uninitialized_parameters(self.interaction.module):
             raise RuntimeError("interaction module has lazy parameters; call materialize() before workflow use")
+        if self.interaction.contract.internal_computation is not None:
+            raise RuntimeError(
+                "TDHook workflows over repeated internal computation require public occurrence-selector "
+                "and occurrence-evidence support from TDHook; the supported revision cannot guarantee identity"
+            )
         self.interaction.input_schema.validate_inputs(data)
 
     def _validate_gradient_contract(self, plan: WorkflowPlan) -> None:
