@@ -31,10 +31,20 @@ Tutorials
 
       Cache an activation and inspect execution provenance.
 
+   .. grid-item-card:: Repeated internal computation
+      :link: notebooks/internal-computation
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`iterations;2em;sd-text-primary`
+
+      Record semantic coordinates for calls to a reused module.
+
 .. toctree::
    :hidden:
 
    notebooks/collection.ipynb
+   notebooks/internal-computation.ipynb
    notebooks/intervention.ipynb
    notebooks/workflow-evidence.ipynb
 
