@@ -67,7 +67,17 @@ from xdrl.provenance import (
     WorkflowPlanEvidence,
     WorkflowProvenance,
 )
-from xdrl.tdhook import OutputArtifactResolver, TDHookWorkflowResult, TDHookWorkflowRunner
+from xdrl.tdhook import (
+    OutputArtifactResolver,
+    PairedWorkflowExecutionError,
+    PairedWorkflowValidationError,
+    TDHookPairedWorkflowResult,
+    TDHookWorkflowPairManifest,
+    TDHookWorkflowResult,
+    TDHookWorkflowRunner,
+    WorkflowArmReference,
+    WorkflowStepDifference,
+)
 from xdrl.types import (
     BatchSemantics,
     ContractModule,
@@ -126,6 +136,8 @@ __all__ = [
     "PRIVATE_UPSTREAM_APIS",
     "PrivateAPIUsage",
     "ProvenanceSchemaError",
+    "PairedWorkflowExecutionError",
+    "PairedWorkflowValidationError",
     "DimensionReduction",
     "ReductionKind",
     "RecurrentCollectorMode",
@@ -142,6 +154,8 @@ __all__ = [
     "SupportLevel",
     "PairedInterventionResult",
     "TDHookWorkflowResult",
+    "TDHookPairedWorkflowResult",
+    "TDHookWorkflowPairManifest",
     "TDHookWorkflowRunner",
     "TensorDictSchema",
     "TensorDictKey",
@@ -150,9 +164,11 @@ __all__ = [
     "VersionRequirement",
     "WORKFLOW_PROVENANCE_SCHEMA_REVISION",
     "WorkflowCompatibilityEvidence",
+    "WorkflowArmReference",
     "WorkflowExecutionEvidence",
     "WorkflowPlanEvidence",
     "WorkflowProvenance",
+    "WorkflowStepDifference",
     "WORKFLOW_CONFORMANCE",
     "installed_dependency_revisions",
     "installed_dependency_versions",
