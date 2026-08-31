@@ -64,6 +64,53 @@ def _run() -> WorkflowProvenance:
     return result.provenance
 
 
+def _payload_with_internal_computation() -> dict[str, object]:
+    payload = _run().to_dict()
+    contract = payload["interaction_contract"]
+    contract["input_schema"]["keys"].append(
+        {
+            "path": ["state"],
+            "role": "state",
+            "presence": "required",
+            "feature_shape": None,
+            "spec_type": None,
+            "spec_constraints": None,
+        }
+    )
+    contract["output_schema"]["keys"].append(
+        {
+            "path": ["next", "state"],
+            "role": "state",
+            "presence": "produced",
+            "feature_shape": None,
+            "spec_type": None,
+            "spec_constraints": None,
+        }
+    )
+    contract["recurrent"] = {
+        "transitions": [{"input_key": ["state"], "output_key": ["next", "state"]}],
+        "reset_keys": [],
+        "sequence_dimension": None,
+        "burn_in": 0,
+        "truncated_window": None,
+        "collector_mode": "direct",
+    }
+    contract["internal_computation"] = {
+        "axes": [
+            {"name": "tick", "coordinates": [0, 1]},
+            {"name": "layer", "coordinates": ["lower", "upper"]},
+        ],
+        "occurrences": [
+            {"module_path": "cell", "call_index": 0, "coordinates": [0, "lower"]},
+            {"module_path": "cell", "call_index": 1, "coordinates": [0, "upper"]},
+            {"module_path": "cell", "call_index": 2, "coordinates": [1, "lower"]},
+            {"module_path": "cell", "call_index": 3, "coordinates": [1, "upper"]},
+        ],
+        "recurrent_state_keys": [["state"], ["next", "state"]],
+    }
+    return payload
+
+
 @pytest.mark.integration
 def test_workflow_provenance_round_trip_covers_verified_execution_boundary() -> None:
     provenance = _run()
@@ -131,6 +178,11 @@ def test_workflow_provenance_rejects_unknown_revisions_and_fields() -> None:
     payload = _run().to_dict()
     payload["schema_revision"] = WORKFLOW_PROVENANCE_SCHEMA_REVISION + 1
     with pytest.raises(ProvenanceSchemaError, match="unsupported workflow provenance schema revision"):
+        WorkflowProvenance.from_dict(payload)
+
+    payload = _run().to_dict()
+    payload["schema_revision"] = 3
+    with pytest.raises(ProvenanceSchemaError, match="revision 3 predates internal-computation"):
         WorkflowProvenance.from_dict(payload)
 
     payload = _run().to_dict()
@@ -218,58 +270,57 @@ def test_workflow_provenance_validates_schema_key_projections() -> None:
 
 @pytest.mark.integration
 def test_workflow_provenance_decodes_recurrent_and_multi_agent_contract_evidence() -> None:
-    payload = _run().to_dict()
+    payload = _payload_with_internal_computation()
     contract = payload["interaction_contract"]
     contract["agent_dimension"] = "agent"
-    contract["input_schema"]["keys"].extend(
-        [
-            {
-                "path": ["state"],
-                "role": "state",
-                "presence": "required",
-                "feature_shape": None,
-                "spec_type": None,
-                "spec_constraints": None,
-            },
-            {
-                "path": ["is_init"],
-                "role": "state",
-                "presence": "required",
-                "feature_shape": None,
-                "spec_type": None,
-                "spec_constraints": None,
-            },
-        ]
-    )
-    contract["output_schema"]["keys"].append(
-        {
-            "path": ["next", "state"],
-            "role": "state",
-            "presence": "produced",
-            "feature_shape": None,
-            "spec_type": None,
-            "spec_constraints": None,
-        }
-    )
-    contract["recurrent"] = {
-        "transitions": [{"input_key": ["state"], "output_key": ["next", "state"]}],
-        "reset_keys": [["is_init"]],
-        "sequence_dimension": None,
-        "burn_in": 0,
-        "truncated_window": None,
-        "collector_mode": "direct",
-    }
     contract["multi_agent"] = {
         "topology": "parameter_shared",
         "group": "agents",
         "n_agents": 2,
         "target": {"role": "actor", "selector": {"group": "agents", "agents": [0, "blue"]}},
     }
-
     restored = WorkflowProvenance.from_dict(payload)
+    round_tripped = WorkflowProvenance.from_json(restored.to_json())
 
     assert restored.interaction_contract["recurrent"]["collector_mode"] == "direct"
     assert restored.interaction_contract["multi_agent"]["n_agents"] == 2
+    assert restored.interaction_contract["internal_computation"]["axes"][0]["name"] == "tick"
+    assert round_tripped == restored
+
+
+@pytest.mark.integration
+def test_workflow_provenance_rejects_ambiguous_internal_occurrence_mapping() -> None:
+    payload = _payload_with_internal_computation()
+    contract = payload["interaction_contract"]
+    contract["internal_computation"]["occurrences"][1]["call_index"] = 0
+
+    with pytest.raises(ProvenanceSchemaError, match="raw hook call cannot identify multiple"):
+        WorkflowProvenance.from_dict(payload)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.update({"axes": {}}), "axes and.*occurrences must be arrays"),
+        (lambda value: value["axes"][0].update({"coordinates": (0, 1)}), "axes\\[0\\].coordinates"),
+        (
+            lambda value: value["occurrences"][0].update({"coordinates": (0, "lower")}),
+            "occurrences\\[0\\].coordinates",
+        ),
+        (lambda value: value["axes"][0]["coordinates"].__setitem__(0, True), "non-empty string or integer"),
+        (lambda value: value["occurrences"][0]["coordinates"].__setitem__(0, 1.0), "non-empty string or integer"),
+        (lambda value: value["occurrences"][1].update({"call_index": 5}), "contiguous from zero"),
+    ],
+)
+def test_workflow_provenance_strictly_decodes_internal_computation(
+    mutation: Callable[[dict[str, object]], None], message: str
+) -> None:
+    payload = _payload_with_internal_computation()
+    mutation(payload["interaction_contract"]["internal_computation"])
+
+    with pytest.raises(ProvenanceSchemaError, match=message):
+        WorkflowProvenance.from_dict(payload)
 
 
 @pytest.mark.integration

@@ -18,6 +18,9 @@ from xdrl.interactions import (
     InteractionTopology,
     InteractionContract,
     InteractionPhase,
+    InternalComputationAxis,
+    InternalComputationSemantics,
+    InternalOccurrence,
     LifecycleEvent,
     LifecycleEventType,
     MultiAgentSemantics,
@@ -28,7 +31,7 @@ from xdrl.interactions import (
 )
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
-WORKFLOW_PROVENANCE_SCHEMA_REVISION = 3
+WORKFLOW_PROVENANCE_SCHEMA_REVISION = 4
 
 
 class ProvenanceSchemaError(ValueError):
@@ -423,6 +426,11 @@ class WorkflowProvenance:
                     "workflow provenance schema revision 2 predates artifact references and cannot be migrated "
                     "without caller-supplied artifact identities; decode it with an XDRL version that supports revision 2"
                 )
+            if revision == 3:
+                raise ProvenanceSchemaError(
+                    "workflow provenance schema revision 3 predates internal-computation semantics; "
+                    "decode it with an XDRL version that supports revision 3"
+                )
             raise ProvenanceSchemaError(
                 f"unsupported workflow provenance schema revision {revision!r}; "
                 f"expected {WORKFLOW_PROVENANCE_SCHEMA_REVISION}"
@@ -499,6 +507,7 @@ _CONTRACT_FIELDS = {
     "module_training",
     "recurrent",
     "multi_agent",
+    "internal_computation",
 }
 
 
@@ -532,6 +541,9 @@ def _contract_projection(value: Any) -> dict[str, Any]:
         contract[name] = _optional_identifier(entry[name], f"{field}.{name}")
     contract["recurrent"] = _recurrent_projection(entry["recurrent"], f"{field}.recurrent")
     contract["multi_agent"] = _multi_agent_projection(entry["multi_agent"], f"{field}.multi_agent")
+    contract["internal_computation"] = _internal_computation_projection(
+        entry["internal_computation"], f"{field}.internal_computation"
+    )
 
     input_batch = contract["input_schema"]["batch_dimensions"]
     output_batch = contract["output_schema"]["batch_dimensions"]
@@ -588,6 +600,20 @@ def _validate_canonical_contract(contract: Mapping[str, Any]) -> None:
             ),
         )
 
+    internal_value = contract["internal_computation"]
+    internal_computation = None
+    if internal_value is not None:
+        internal_computation = InternalComputationSemantics(
+            axes=tuple(
+                InternalComputationAxis(item["name"], tuple(item["coordinates"])) for item in internal_value["axes"]
+            ),
+            occurrences=tuple(
+                InternalOccurrence(item["module_path"], item["call_index"], tuple(item["coordinates"]))
+                for item in internal_value["occurrences"]
+            ),
+            recurrent_state_keys=tuple(tuple(item) for item in internal_value["recurrent_state_keys"]),
+        )
+
     try:
         InteractionContract(
             identity=contract["identity"],
@@ -613,6 +639,7 @@ def _validate_canonical_contract(contract: Mapping[str, Any]) -> None:
             module_training=contract["module_training"],
             recurrent=recurrent,
             multi_agent=multi_agent,
+            internal_computation=internal_computation,
         )
     except (TypeError, ValueError, NotImplementedError) as error:
         raise ProvenanceSchemaError(f"interaction_contract violates canonical invariants: {error}") from error
@@ -707,6 +734,62 @@ def _multi_agent_projection(value: Any, field: str) -> dict[str, Any] | None:
                 "agents": list(agents_value),
             },
         },
+    }
+
+
+def _internal_coordinate(value: Any, field: str) -> str | int:
+    if type(value) not in {str, int} or value == "":
+        raise ProvenanceSchemaError(f"{field} must be a non-empty string or integer")
+    return value
+
+
+def _internal_computation_projection(value: Any, field: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    entry = _exact_mapping(value, field, {"axes", "occurrences", "recurrent_state_keys"})
+    axes_value = entry["axes"]
+    occurrences_value = entry["occurrences"]
+    if not isinstance(axes_value, list) or not isinstance(occurrences_value, list):
+        raise ProvenanceSchemaError(f"{field}.axes and {field}.occurrences must be arrays")
+    axes = []
+    for index, value in enumerate(axes_value):
+        axis_field = f"{field}.axes[{index}]"
+        axis = _exact_mapping(value, axis_field, {"name", "coordinates"})
+        coordinates = axis["coordinates"]
+        if not isinstance(coordinates, list):
+            raise ProvenanceSchemaError(f"{axis_field}.coordinates must be an array")
+        axes.append(
+            {
+                "name": _nonempty_string(axis["name"], f"{axis_field}.name"),
+                "coordinates": [
+                    _internal_coordinate(item, f"{axis_field}.coordinates[{coordinate_index}]")
+                    for coordinate_index, item in enumerate(coordinates)
+                ],
+            }
+        )
+    occurrences = []
+    for index, value in enumerate(occurrences_value):
+        occurrence_field = f"{field}.occurrences[{index}]"
+        occurrence = _exact_mapping(value, occurrence_field, {"module_path", "call_index", "coordinates"})
+        coordinates = occurrence["coordinates"]
+        if not isinstance(coordinates, list):
+            raise ProvenanceSchemaError(f"{occurrence_field}.coordinates must be an array")
+        occurrences.append(
+            {
+                "module_path": _nonempty_string(occurrence["module_path"], f"{occurrence_field}.module_path"),
+                "call_index": _integer(occurrence["call_index"], f"{occurrence_field}.call_index", minimum=0),
+                "coordinates": [
+                    _internal_coordinate(item, f"{occurrence_field}.coordinates[{coordinate_index}]")
+                    for coordinate_index, item in enumerate(coordinates)
+                ],
+            }
+        )
+    return {
+        "axes": axes,
+        "occurrences": occurrences,
+        "recurrent_state_keys": [
+            list(path) for path in _key_paths(entry["recurrent_state_keys"], f"{field}.recurrent_state_keys")
+        ],
     }
 
 

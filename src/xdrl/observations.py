@@ -17,7 +17,7 @@ from typing import Any
 import torch
 from tensordict import TensorDictBase
 
-from xdrl.interactions import InteractionContract
+from xdrl.interactions import InteractionContract, InternalOccurrence
 from xdrl.types import KeyRole, TensorDictKey
 
 
@@ -131,6 +131,8 @@ class ObservationRecord:
     logical_step: int | None
     episode_id: str | int | None
     trajectory_id: str | int | None
+    internal_coordinates: tuple[tuple[str, str | int], ...] | None
+    raw_call_index: int | None
     shape: tuple[int, ...]
     dtype: str
     device: str
@@ -165,6 +167,7 @@ class ObservationTrace:
         direction: HookDirection = HookDirection.TENSOR,
         key: TensorDictKey | None = None,
         batch_dimensions: tuple[str, ...] | None = None,
+        occurrence: InternalOccurrence | None = None,
     ) -> ObservationRecord | None:
         """Capture a hook, gradient, or arbitrary tensor with explicit retention.
 
@@ -196,6 +199,12 @@ class ObservationTrace:
             logical_step=contract.logical_step,
             episode_id=contract.episode_id,
             trajectory_id=contract.trajectory_id,
+            internal_coordinates=(
+                contract.internal_computation.coordinates_for(occurrence)
+                if occurrence is not None and contract.internal_computation is not None
+                else None
+            ),
+            raw_call_index=occurrence.call_index if occurrence is not None else None,
             shape=tuple(tensor.shape),
             dtype=str(tensor.dtype),
             device=str(tensor.device),

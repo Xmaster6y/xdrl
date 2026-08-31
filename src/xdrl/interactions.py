@@ -8,7 +8,7 @@ and temporary execution state needed to invoke that module safely.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -65,6 +65,146 @@ class RecurrentCollectorMode(str, Enum):
     MULTIPROCESS = "multiprocess"
     ASYNC = "async"
     DISTRIBUTED = "distributed"
+
+
+class OccurrenceIdentityError(RuntimeError):
+    """Internal hook calls did not match their declared semantic identities."""
+
+
+InternalCoordinate = str | int
+
+
+@dataclass(frozen=True, slots=True)
+class InternalComputationAxis:
+    """One named, architecture-independent internal-computation dimension."""
+
+    name: str
+    coordinates: tuple[InternalCoordinate, ...]
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("internal-computation axis name must be non-empty")
+        if not self.coordinates:
+            raise ValueError(f"internal-computation axis {self.name!r} requires coordinates")
+        if any(type(value) not in {str, int} or value == "" for value in self.coordinates):
+            raise TypeError("internal-computation coordinates must be non-empty strings or integers")
+        if len(set(self.coordinates)) != len(self.coordinates):
+            raise ValueError(f"internal-computation axis {self.name!r} contains duplicate coordinates")
+
+
+@dataclass(frozen=True, slots=True)
+class InternalOccurrence:
+    """Bind semantic coordinates to one raw call of a target module.
+
+    ``call_index`` is zero-based within one root interaction call. It is an
+    execution mapping, not an internal-computation dimension.
+    """
+
+    module_path: str
+    call_index: int
+    coordinates: tuple[InternalCoordinate, ...]
+
+    def __post_init__(self) -> None:
+        if not self.module_path:
+            raise ValueError("internal occurrence module_path must be non-empty")
+        if type(self.call_index) is not int or self.call_index < 0:
+            raise ValueError("internal occurrence call_index must be a non-negative integer")
+        if any(type(value) not in {str, int} or value == "" for value in self.coordinates):
+            raise TypeError("internal occurrence coordinates must be non-empty strings or integers")
+
+
+@dataclass(frozen=True, slots=True)
+class InternalOccurrenceSelection:
+    """Select internal occurrences by named semantic coordinates."""
+
+    coordinates: tuple[tuple[str, InternalCoordinate], ...]
+
+    def __post_init__(self) -> None:
+        names = tuple(name for name, _value in self.coordinates)
+        if any(not name for name in names):
+            raise ValueError("internal occurrence selection axis names must be non-empty")
+        if len(set(names)) != len(names):
+            raise ValueError("internal occurrence selection contains duplicate axes")
+        if any(type(value) not in {str, int} or value == "" for _name, value in self.coordinates):
+            raise TypeError("internal occurrence selection values must be non-empty strings or integers")
+
+
+@dataclass(frozen=True, slots=True)
+class InternalComputationSemantics:
+    """Serializable semantic axes and their exact per-root-call hook mapping.
+
+    Environment time and sequence/burn-in remain owned by
+    :class:`InteractionContract` and :class:`RecurrentSemantics`. These axes
+    name only repeated computation inside one root model call. ``occurrences``
+    explicitly bridges those semantics to raw hook-call order.
+    """
+
+    axes: tuple[InternalComputationAxis, ...]
+    occurrences: tuple[InternalOccurrence, ...]
+    recurrent_state_keys: tuple[tuple[str, ...], ...]
+
+    def __post_init__(self) -> None:
+        if not self.axes:
+            raise ValueError("internal-computation semantics require at least one axis")
+        names = tuple(axis.name for axis in self.axes)
+        if len(set(names)) != len(names):
+            raise ValueError("internal-computation axis names must be unique")
+        if not self.occurrences:
+            raise ValueError("internal-computation semantics require occurrence mappings")
+        if not self.recurrent_state_keys:
+            raise ValueError("internal computation must identify related recurrent state keys")
+        if len(set(self.recurrent_state_keys)) != len(self.recurrent_state_keys):
+            raise ValueError("internal computation contains duplicate recurrent state keys")
+        semantic_identities: set[tuple[InternalCoordinate, ...]] = set()
+        raw_identities: set[tuple[str, int]] = set()
+        indices_by_path: dict[str, set[int]] = {}
+        for occurrence in self.occurrences:
+            if len(occurrence.coordinates) != len(self.axes):
+                raise ValueError("internal occurrence must provide one coordinate for every declared axis")
+            for axis, coordinate in zip(self.axes, occurrence.coordinates):
+                if coordinate not in axis.coordinates:
+                    raise ValueError(
+                        f"coordinate {coordinate!r} is not declared on internal-computation axis {axis.name!r}"
+                    )
+            if occurrence.coordinates in semantic_identities:
+                raise ValueError("internal occurrence semantic coordinates must be unique")
+            raw_identity = (occurrence.module_path, occurrence.call_index)
+            if raw_identity in raw_identities:
+                raise ValueError("one raw hook call cannot identify multiple internal occurrences")
+            semantic_identities.add(occurrence.coordinates)
+            raw_identities.add(raw_identity)
+            indices_by_path.setdefault(occurrence.module_path, set()).add(occurrence.call_index)
+        for module_path, indices in indices_by_path.items():
+            if indices != set(range(len(indices))):
+                raise ValueError(f"internal occurrence call indices for {module_path!r} must be contiguous from zero")
+
+    def select(self, selection: InternalOccurrenceSelection) -> tuple[InternalOccurrence, ...]:
+        """Resolve a semantic selection to exact raw occurrences or fail."""
+        axis_names = tuple(axis.name for axis in self.axes)
+        requested = dict(selection.coordinates)
+        unknown = set(requested) - set(axis_names)
+        if unknown:
+            raise OccurrenceIdentityError(f"unknown internal-computation axes: {', '.join(sorted(unknown))}")
+        for axis in self.axes:
+            if axis.name in requested and requested[axis.name] not in axis.coordinates:
+                raise OccurrenceIdentityError(
+                    f"coordinate {requested[axis.name]!r} is not declared on axis {axis.name!r}"
+                )
+        matches = tuple(
+            occurrence
+            for occurrence in self.occurrences
+            if all(
+                axis.name not in requested or requested[axis.name] == coordinate
+                for axis, coordinate in zip(self.axes, occurrence.coordinates)
+            )
+        )
+        if not matches:
+            raise OccurrenceIdentityError("internal occurrence selection matched no declared calls")
+        return matches
+
+    def coordinates_for(self, occurrence: InternalOccurrence) -> tuple[tuple[str, InternalCoordinate], ...]:
+        """Return named coordinates for one occurrence in canonical axis order."""
+        return tuple((axis.name, value) for axis, value in zip(self.axes, occurrence.coordinates))
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +358,7 @@ class InteractionContract:
     module_training: bool | None = None
     recurrent: RecurrentSemantics | None = None
     multi_agent: MultiAgentSemantics | None = None
+    internal_computation: InternalComputationSemantics | None = None
 
     def __post_init__(self) -> None:
         if not self.identity:
@@ -234,6 +375,8 @@ class InteractionContract:
             _validate_recurrent_contract(self)
         if self.multi_agent is not None:
             _validate_multi_agent_contract(self)
+        if self.internal_computation is not None:
+            _validate_internal_computation_contract(self)
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible tensor-free projection of this contract."""
@@ -262,6 +405,9 @@ class InteractionContract:
             "module_training": self.module_training,
             "recurrent": asdict(self.recurrent) if self.recurrent is not None else None,
             "multi_agent": asdict(self.multi_agent) if self.multi_agent is not None else None,
+            "internal_computation": (
+                asdict(self.internal_computation) if self.internal_computation is not None else None
+            ),
         }
 
     @property
@@ -323,6 +469,7 @@ class RuntimeInteractionContext:
     events: list[LifecycleEvent] = field(default_factory=list, init=False)
     _stack: ExitStack | None = field(default=None, init=False, repr=False)
     _observing_module_calls: bool = field(default=False, init=False, repr=False)
+    _observing_internal_computation: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.input_schema.validate_inputs(self.representative_input)
@@ -389,6 +536,11 @@ class RuntimeInteractionContext:
         if self._stack is None:
             raise RuntimeError("invoke must be called inside the interaction context")
         invoked_module = self.module if module is None else module
+        if self._observing_internal_computation and invoked_module is not self.module:
+            raise OccurrenceIdentityError(
+                "module overrides are unsupported while observing internal computation; "
+                "occurrence hooks are bound to the declared root module"
+            )
         if module is not None and module is not self.module and self.contract.module_training is not None:
             _set_training_mode(self._stack, invoked_module, self.contract.module_training)
         return self.invoke_callable(tensordict, invoked_module)
@@ -409,6 +561,11 @@ class RuntimeInteractionContext:
         """
         if self._stack is None:
             raise RuntimeError("invoke_callable must be called inside the interaction context")
+        if self._observing_internal_computation and operation is not self.module:
+            raise OccurrenceIdentityError(
+                "callable overrides are unsupported while observing internal computation; "
+                "occurrence hooks are bound to the declared root module"
+            )
         if module is not None and module is not self.module and self.contract.module_training is not None:
             _set_training_mode(self._stack, module, self.contract.module_training)
         current = self._before_call(tensordict)
@@ -470,6 +627,93 @@ class RuntimeInteractionContext:
             post_handle.remove()
             pre_handle.remove()
             self._observing_module_calls = False
+
+    @contextmanager
+    def observe_internal_computation(self) -> Iterator[None]:
+        """Record exact declared internal occurrences for every root call.
+
+        Public PyTorch forward hooks provide the raw call index. The contract
+        provides its semantic layer/tick coordinates. Missing, extra, or
+        reordered calls fail before the root call returns successfully.
+        """
+        semantics = self.contract.internal_computation
+        if semantics is None:
+            raise RuntimeError("interaction does not declare internal-computation semantics")
+        if self._stack is None:
+            raise RuntimeError("observe_internal_computation requires an active interaction context")
+        if self._observing_internal_computation:
+            raise RuntimeError("internal-computation observation is already active")
+
+        expected = {(item.module_path, item.call_index): item for item in semantics.occurrences}
+        expected_counts: dict[str, int] = {}
+        for occurrence in semantics.occurrences:
+            expected_counts[occurrence.module_path] = max(
+                expected_counts.get(occurrence.module_path, 0), occurrence.call_index + 1
+            )
+        counts: dict[str, int] = {}
+        in_root_call = False
+        handles: list[torch.utils.hooks.RemovableHandle] = []
+
+        def root_before(_module: torch.nn.Module, _args: tuple[object, ...]) -> None:
+            nonlocal in_root_call
+            if in_root_call:
+                raise OccurrenceIdentityError("nested root calls make internal occurrence identity ambiguous")
+            counts.clear()
+            in_root_call = True
+
+        def root_after(_module: torch.nn.Module, _args: tuple[object, ...], output: object) -> object:
+            nonlocal in_root_call
+            try:
+                if counts != expected_counts:
+                    raise OccurrenceIdentityError(
+                        f"internal occurrence counts mismatch: expected {expected_counts!r}, observed {counts!r}"
+                    )
+                return output
+            finally:
+                in_root_call = False
+
+        def internal_after(path: str) -> Callable[[torch.nn.Module, tuple[object, ...], object], object]:
+            def hook(_module: torch.nn.Module, _args: tuple[object, ...], output: object) -> object:
+                if not in_root_call:
+                    raise OccurrenceIdentityError("internal target was called outside the declared root interaction")
+                call_index = counts.get(path, 0)
+                counts[path] = call_index + 1
+                occurrence = expected.get((path, call_index))
+                if occurrence is None:
+                    raise OccurrenceIdentityError(f"undeclared internal occurrence {path!r} call_index={call_index}")
+                tensor = _single_tensor_output(output, path)
+                if self.observations is not None:
+                    from xdrl.observations import HookDirection, ObservationKind
+
+                    self.observations.observe_tensor(
+                        self.contract,
+                        tensor,
+                        kind=ObservationKind.ACTIVATION,
+                        target=path,
+                        direction=HookDirection.OUTPUT,
+                        occurrence=occurrence,
+                    )
+                return output
+
+            return hook
+
+        self._observing_internal_computation = True
+        try:
+            handles.append(self.module.register_forward_pre_hook(root_before, prepend=True))
+            handles.append(self.module.register_forward_hook(root_after))
+            for path in expected_counts:
+                try:
+                    target = self.module.get_submodule(path)
+                except AttributeError as error:
+                    raise OccurrenceIdentityError(
+                        f"internal occurrence module path {path!r} does not exist"
+                    ) from error
+                handles.append(target.register_forward_hook(internal_after(path)))
+            yield
+        finally:
+            for handle in reversed(handles):
+                handle.remove()
+            self._observing_internal_computation = False
 
     def _before_call(self, tensordict: TensorDictBase) -> TensorDictBase:
         self._record(LifecycleEventType.BEFORE, tensordict)
@@ -594,6 +838,36 @@ def _validate_multi_agent_contract(contract: InteractionContract) -> None:
         raise ValueError("centralised-critic interactions require a critic or value role")
     if semantics.topology is InteractionTopology.MIXER and contract.role is not ModelRole.MIXER:
         raise ValueError("mixer interactions require the mixer model role")
+
+
+def _validate_internal_computation_contract(contract: InteractionContract) -> None:
+    semantics = contract.internal_computation
+    assert semantics is not None
+    if contract.recurrent is None:
+        raise ValueError("internal computation requires recurrent semantics")
+    reserved = {name for name in (contract.time_dimension, contract.recurrent.sequence_dimension) if name is not None}
+    overlap = reserved.intersection(axis.name for axis in semantics.axes)
+    if overlap:
+        raise ValueError(
+            "internal-computation axes must be distinct from environment/sequence time dimensions: "
+            + ", ".join(sorted(overlap))
+        )
+    transition_keys = {
+        key for transition in contract.recurrent.transitions for key in (transition.input_key, transition.output_key)
+    }
+    unknown = set(semantics.recurrent_state_keys) - transition_keys
+    if unknown:
+        raise ValueError("internal computation references keys outside the recurrent state transitions")
+
+
+def _single_tensor_output(output: object, path: str) -> torch.Tensor:
+    if isinstance(output, torch.Tensor):
+        return output
+    if isinstance(output, Sequence) and len(output) == 1 and isinstance(output[0], torch.Tensor):
+        return output[0]
+    raise OccurrenceIdentityError(
+        f"internal occurrence target {path!r} must return one tensor for unambiguous observation"
+    )
 
 
 def _restore_training_states(states: tuple[tuple[torch.nn.Module, bool], ...]) -> None:
