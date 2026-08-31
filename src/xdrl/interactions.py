@@ -109,6 +109,8 @@ class InternalOccurrence:
             raise ValueError("internal occurrence module_path must be non-empty")
         if type(self.call_index) is not int or self.call_index < 0:
             raise ValueError("internal occurrence call_index must be a non-negative integer")
+        if any(type(value) not in {str, int} or value == "" for value in self.coordinates):
+            raise TypeError("internal occurrence coordinates must be non-empty strings or integers")
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +125,8 @@ class InternalOccurrenceSelection:
             raise ValueError("internal occurrence selection axis names must be non-empty")
         if len(set(names)) != len(names):
             raise ValueError("internal occurrence selection contains duplicate axes")
+        if any(type(value) not in {str, int} or value == "" for _name, value in self.coordinates):
+            raise TypeError("internal occurrence selection values must be non-empty strings or integers")
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +157,7 @@ class InternalComputationSemantics:
             raise ValueError("internal computation contains duplicate recurrent state keys")
         semantic_identities: set[tuple[InternalCoordinate, ...]] = set()
         raw_identities: set[tuple[str, int]] = set()
+        indices_by_path: dict[str, set[int]] = {}
         for occurrence in self.occurrences:
             if len(occurrence.coordinates) != len(self.axes):
                 raise ValueError("internal occurrence must provide one coordinate for every declared axis")
@@ -168,6 +173,10 @@ class InternalComputationSemantics:
                 raise ValueError("one raw hook call cannot identify multiple internal occurrences")
             semantic_identities.add(occurrence.coordinates)
             raw_identities.add(raw_identity)
+            indices_by_path.setdefault(occurrence.module_path, set()).add(occurrence.call_index)
+        for module_path, indices in indices_by_path.items():
+            if indices != set(range(len(indices))):
+                raise ValueError(f"internal occurrence call indices for {module_path!r} must be contiguous from zero")
 
     def select(self, selection: InternalOccurrenceSelection) -> tuple[InternalOccurrence, ...]:
         """Resolve a semantic selection to exact raw occurrences or fail."""
@@ -527,6 +536,11 @@ class RuntimeInteractionContext:
         if self._stack is None:
             raise RuntimeError("invoke must be called inside the interaction context")
         invoked_module = self.module if module is None else module
+        if self._observing_internal_computation and invoked_module is not self.module:
+            raise OccurrenceIdentityError(
+                "module overrides are unsupported while observing internal computation; "
+                "occurrence hooks are bound to the declared root module"
+            )
         if module is not None and module is not self.module and self.contract.module_training is not None:
             _set_training_mode(self._stack, invoked_module, self.contract.module_training)
         return self.invoke_callable(tensordict, invoked_module)
@@ -547,6 +561,11 @@ class RuntimeInteractionContext:
         """
         if self._stack is None:
             raise RuntimeError("invoke_callable must be called inside the interaction context")
+        if self._observing_internal_computation and operation is not self.module:
+            raise OccurrenceIdentityError(
+                "callable overrides are unsupported while observing internal computation; "
+                "occurrence hooks are bound to the declared root module"
+            )
         if module is not None and module is not self.module and self.contract.module_training is not None:
             _set_training_mode(self._stack, module, self.contract.module_training)
         current = self._before_call(tensordict)

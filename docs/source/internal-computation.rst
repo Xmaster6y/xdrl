@@ -64,7 +64,9 @@ root interaction call it resets raw counters, records the exact semantic
 coordinates on ``ObservationRecord.internal_coordinates``, and verifies the
 complete call mapping before the root result is accepted.  Undeclared, missing,
 extra, or nested calls raise ``OccurrenceIdentityError``.  Hooks are removed on
-success and failure.
+success and failure.  Module and callable overrides are rejected while the
+observer is active because its hooks are bound to the contract's declared root
+module.
 
 This observer supports local synchronous activation evidence.  It does not
 claim that hook order is a portable model identity and it does not implement an

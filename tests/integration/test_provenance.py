@@ -309,6 +309,8 @@ def test_workflow_provenance_rejects_ambiguous_internal_occurrence_mapping() -> 
             "occurrences\\[0\\].coordinates",
         ),
         (lambda value: value["axes"][0]["coordinates"].__setitem__(0, True), "non-empty string or integer"),
+        (lambda value: value["occurrences"][0]["coordinates"].__setitem__(0, 1.0), "non-empty string or integer"),
+        (lambda value: value["occurrences"][1].update({"call_index": 5}), "contiguous from zero"),
     ],
 )
 def test_workflow_provenance_strictly_decodes_internal_computation(

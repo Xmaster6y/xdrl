@@ -174,8 +174,12 @@ def test_semantic_selection_resolves_to_exact_raw_calls() -> None:
         (lambda: InternalComputationAxis("tick", (0, 0)), "duplicate coordinates"),
         (lambda: InternalOccurrence("", 0, (0,)), "module_path must be non-empty"),
         (lambda: InternalOccurrence("cell", -1, (0,)), "non-negative integer"),
+        (lambda: InternalOccurrence("cell", 0, (True,)), "coordinates must be non-empty strings or integers"),
+        (lambda: InternalOccurrence("cell", 0, (1.0,)), "coordinates must be non-empty strings or integers"),
         (lambda: InternalOccurrenceSelection((("", 0),)), "axis names must be non-empty"),
         (lambda: InternalOccurrenceSelection((("tick", 0), ("tick", 1))), "duplicate axes"),
+        (lambda: InternalOccurrenceSelection((("tick", True),)), "values must be non-empty strings or integers"),
+        (lambda: InternalOccurrenceSelection((("tick", 1.0),)), "values must be non-empty strings or integers"),
         (lambda: InternalComputationSemantics((), (), (("state",),)), "at least one axis"),
         (
             lambda: InternalComputationSemantics(
@@ -234,6 +238,14 @@ def test_semantic_selection_resolves_to_exact_raw_calls() -> None:
                 (("state",),),
             ),
             "raw hook call cannot identify multiple",
+        ),
+        (
+            lambda: InternalComputationSemantics(
+                (InternalComputationAxis("tick", (0, 1)),),
+                (InternalOccurrence("cell", 0, (0,)), InternalOccurrence("cell", 2, (1,))),
+                (("state",),),
+            ),
+            "call indices.*must be contiguous from zero",
         ),
     ],
 )
@@ -362,6 +374,23 @@ def test_tdhook_workflows_fail_before_planning_without_occurrence_evidence() -> 
 
     with pytest.raises(RuntimeError, match="occurrence-selector.*cannot guarantee identity"):
         TDHookWorkflowRunner(interaction).plan(workflow, interaction.representative_input.clone())
+
+
+def test_internal_observer_rejects_root_module_and_callable_overrides() -> None:
+    interaction = _interaction()
+    override = TensorDictModule(
+        RepeatedConvLSTMFixture(),
+        in_keys=["observation", "state"],
+        out_keys=[("next", "state"), "action"],
+    )
+
+    with interaction, interaction.observe_internal_computation():
+        with pytest.raises(OccurrenceIdentityError, match="module overrides are unsupported"):
+            interaction.invoke(interaction.representative_input.clone(), module=override)
+        with pytest.raises(OccurrenceIdentityError, match="callable overrides are unsupported"):
+            interaction.invoke_callable(interaction.representative_input.clone(), override)
+
+    assert not interaction.events
 
 
 def test_internal_axes_cannot_relabel_environment_time_or_unrelated_state() -> None:
