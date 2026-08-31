@@ -41,4 +41,21 @@ Tutorials
 Reproductions
 -------------
 
-No reproductions yet.
+.. grid:: 1 2 2 2
+   :gutter: 3
+
+   .. grid-item-card:: Functional neural modules in MiniGrid
+      :link: reproductions/bixrl-functional-modularity
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`beaker;2em;sd-text-primary`
+
+      BIXRL 2D module detection and matched weight interventions.
+
+      **Evidence status:** bounded smoke path only; no scientific agreement claim.
+
+.. toctree::
+   :hidden:
+
+   reproductions/bixrl-functional-modularity.ipynb
