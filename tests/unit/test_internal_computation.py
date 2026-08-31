@@ -46,6 +46,21 @@ class AmbiguousCell(torch.nn.Module):
         return value, value
 
 
+class SingletonCell(torch.nn.Module):
+    def forward(self, value: torch.Tensor) -> tuple[torch.Tensor]:
+        return (value,)
+
+
+class SingletonOutputFixture(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cell = SingletonCell()
+
+    def forward(self, observation: torch.Tensor, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        (hidden,) = self.cell(state + observation)
+        return hidden, hidden.mean(dim=(-2, -1))
+
+
 def _semantics() -> InternalComputationSemantics:
     return InternalComputationSemantics(
         axes=(
@@ -311,6 +326,34 @@ def test_internal_observer_rejects_ambiguous_module_outputs() -> None:
     with pytest.raises(OccurrenceIdentityError, match="must return one tensor"):
         with interaction, interaction.observe_internal_computation():
             interaction.invoke(interaction.representative_input.clone())
+
+
+def test_internal_observer_accepts_one_tensor_inside_a_singleton_output() -> None:
+    interaction = _interaction()
+    semantics = InternalComputationSemantics(
+        axes=(InternalComputationAxis("tick", (0,)),),
+        occurrences=(InternalOccurrence("module.cell", 0, (0,)),),
+        recurrent_state_keys=(("state",),),
+    )
+    module = TensorDictModule(
+        SingletonOutputFixture(),
+        in_keys=["observation", "state"],
+        out_keys=[("next", "state"), "action"],
+    )
+    interaction = RuntimeInteractionContext(
+        replace(interaction.contract, internal_computation=semantics),
+        module,
+        interaction.representative_input,
+        observations=ObservationTrace(),
+    )
+
+    with interaction, interaction.observe_internal_computation():
+        result = interaction.invoke(interaction.representative_input.clone())
+
+    assert result["next", "state"].shape == (2, 1, 2, 2)
+    assert [
+        record.raw_call_index for record in interaction.observations.records if record.raw_call_index is not None
+    ] == [0]
 
 
 def test_tdhook_workflows_fail_before_planning_without_occurrence_evidence() -> None:
