@@ -689,8 +689,6 @@ class RuntimeInteractionContext:
                     raise OccurrenceIdentityError(
                         f"internal occurrence module path {path!r} does not exist"
                     ) from error
-                if target is self.module:
-                    raise OccurrenceIdentityError("internal occurrence target cannot be the root module")
                 handles.append(target.register_forward_hook(internal_after(path)))
             yield
         finally:

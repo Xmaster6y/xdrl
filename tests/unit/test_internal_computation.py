@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 import torch
 from tensordict import TensorDict
@@ -37,6 +39,11 @@ class RepeatedConvLSTMFixture(torch.nn.Module):
             hidden = self.cell(hidden)  # semantic layer 0
             hidden = self.cell(hidden)  # semantic layer 1, same module instance
         return hidden, hidden.mean(dim=(-2, -1))
+
+
+class AmbiguousCell(torch.nn.Module):
+    def forward(self, value: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return value, value
 
 
 def _semantics() -> InternalComputationSemantics:
@@ -131,6 +138,93 @@ def test_semantic_selection_resolves_to_exact_raw_calls() -> None:
     ]
     with pytest.raises(OccurrenceIdentityError, match="unknown internal-computation axes"):
         semantics.select(InternalOccurrenceSelection((("environment_time", 0),)))
+    with pytest.raises(OccurrenceIdentityError, match="not declared on axis"):
+        semantics.select(InternalOccurrenceSelection((("tick", 3),)))
+
+    sparse = InternalComputationSemantics(
+        axes=(InternalComputationAxis("tick", (0, 1)),),
+        occurrences=(InternalOccurrence("module.cell", 0, (0,)),),
+        recurrent_state_keys=(("state",),),
+    )
+    with pytest.raises(OccurrenceIdentityError, match="matched no declared calls"):
+        sparse.select(InternalOccurrenceSelection((("tick", 1),)))
+
+
+@pytest.mark.parametrize(
+    ("factory", "message"),
+    [
+        (lambda: InternalComputationAxis("", (0,)), "name must be non-empty"),
+        (lambda: InternalComputationAxis("tick", ()), "requires coordinates"),
+        (lambda: InternalComputationAxis("tick", (object(),)), "strings or integers"),
+        (lambda: InternalComputationAxis("tick", (0, 0)), "duplicate coordinates"),
+        (lambda: InternalOccurrence("", 0, (0,)), "module_path must be non-empty"),
+        (lambda: InternalOccurrence("cell", -1, (0,)), "non-negative integer"),
+        (lambda: InternalOccurrenceSelection((("", 0),)), "axis names must be non-empty"),
+        (lambda: InternalOccurrenceSelection((("tick", 0), ("tick", 1))), "duplicate axes"),
+        (lambda: InternalComputationSemantics((), (), (("state",),)), "at least one axis"),
+        (
+            lambda: InternalComputationSemantics(
+                (InternalComputationAxis("tick", (0,)), InternalComputationAxis("tick", (0,))),
+                (InternalOccurrence("cell", 0, (0, 0)),),
+                (("state",),),
+            ),
+            "axis names must be unique",
+        ),
+        (
+            lambda: InternalComputationSemantics((InternalComputationAxis("tick", (0,)),), (), (("state",),)),
+            "require occurrence mappings",
+        ),
+        (
+            lambda: InternalComputationSemantics(
+                (InternalComputationAxis("tick", (0,)),), (InternalOccurrence("cell", 0, (0,)),), ()
+            ),
+            "identify related recurrent state keys",
+        ),
+        (
+            lambda: InternalComputationSemantics(
+                (InternalComputationAxis("tick", (0,)),),
+                (InternalOccurrence("cell", 0, (0,)),),
+                (("state",), ("state",)),
+            ),
+            "duplicate recurrent state keys",
+        ),
+        (
+            lambda: InternalComputationSemantics(
+                (InternalComputationAxis("tick", (0,)),),
+                (InternalOccurrence("cell", 0, (0, 1)),),
+                (("state",),),
+            ),
+            "one coordinate for every",
+        ),
+        (
+            lambda: InternalComputationSemantics(
+                (InternalComputationAxis("tick", (0,)),),
+                (InternalOccurrence("cell", 0, (1,)),),
+                (("state",),),
+            ),
+            "not declared on internal-computation axis",
+        ),
+        (
+            lambda: InternalComputationSemantics(
+                (InternalComputationAxis("tick", (0,)),),
+                (InternalOccurrence("cell", 0, (0,)), InternalOccurrence("other", 0, (0,))),
+                (("state",),),
+            ),
+            "semantic coordinates must be unique",
+        ),
+        (
+            lambda: InternalComputationSemantics(
+                (InternalComputationAxis("tick", (0, 1)),),
+                (InternalOccurrence("cell", 0, (0,)), InternalOccurrence("cell", 0, (1,))),
+                (("state",),),
+            ),
+            "raw hook call cannot identify multiple",
+        ),
+    ],
+)
+def test_internal_computation_types_reject_invalid_identity_contracts(factory: object, message: str) -> None:
+    with pytest.raises((TypeError, ValueError), match=message):
+        factory()
 
 
 def test_ambiguous_or_changed_call_mapping_fails_and_hooks_are_cleaned_up() -> None:
@@ -145,6 +239,80 @@ def test_ambiguous_or_changed_call_mapping_fails_and_hooks_are_cleaned_up() -> N
     assert tuple(cell._forward_hooks) == original_hooks
 
 
+def test_missing_internal_calls_fail_before_root_output_is_accepted() -> None:
+    interaction = _interaction(ticks=1)
+
+    with pytest.raises(OccurrenceIdentityError, match="occurrence counts mismatch"):
+        with interaction, interaction.observe_internal_computation():
+            interaction.invoke(interaction.representative_input.clone())
+
+
+def test_internal_observer_rejects_invalid_lifecycle_and_target_paths() -> None:
+    interaction = _interaction()
+
+    with pytest.raises(RuntimeError, match="requires an active interaction context"):
+        with interaction.observe_internal_computation():
+            pass
+
+    without_semantics = RuntimeInteractionContext(
+        replace(interaction.contract, internal_computation=None),
+        interaction.module,
+        interaction.representative_input,
+    )
+    with without_semantics, pytest.raises(RuntimeError, match="does not declare"):
+        with without_semantics.observe_internal_computation():
+            pass
+
+    with interaction, interaction.observe_internal_computation():
+        with pytest.raises(RuntimeError, match="already active"):
+            with interaction.observe_internal_computation():
+                pass
+        with pytest.raises(OccurrenceIdentityError, match="outside the declared root"):
+            interaction.module.get_submodule("module.cell")(torch.ones(1, 1, 2, 2))
+
+    missing_path = InternalComputationSemantics(
+        axes=(InternalComputationAxis("tick", (0,)),),
+        occurrences=(InternalOccurrence("module.missing", 0, (0,)),),
+        recurrent_state_keys=(("state",),),
+    )
+    missing_path_interaction = RuntimeInteractionContext(
+        replace(interaction.contract, internal_computation=missing_path),
+        interaction.module,
+        interaction.representative_input,
+    )
+    with missing_path_interaction, pytest.raises(OccurrenceIdentityError, match="does not exist"):
+        with missing_path_interaction.observe_internal_computation():
+            pass
+
+
+def test_nested_root_calls_fail_as_ambiguous() -> None:
+    interaction = _interaction()
+    recurse = True
+
+    def invoke_nested_root(_module: torch.nn.Module, args: tuple[object, ...]) -> None:
+        nonlocal recurse
+        if recurse:
+            recurse = False
+            interaction.module(args[0].clone())
+
+    handle = interaction.module.register_forward_pre_hook(invoke_nested_root)
+    try:
+        with pytest.raises(OccurrenceIdentityError, match="nested root calls"):
+            with interaction, interaction.observe_internal_computation():
+                interaction.invoke(interaction.representative_input.clone())
+    finally:
+        handle.remove()
+
+
+def test_internal_observer_rejects_ambiguous_module_outputs() -> None:
+    interaction = _interaction()
+    interaction.module.module.cell = AmbiguousCell()
+
+    with pytest.raises(OccurrenceIdentityError, match="must return one tensor"):
+        with interaction, interaction.observe_internal_computation():
+            interaction.invoke(interaction.representative_input.clone())
+
+
 def test_tdhook_workflows_fail_before_planning_without_occurrence_evidence() -> None:
     interaction = _interaction()
     workflow = Workflow(ActivationCaching("module.cell", cache_key=("activations", "cell")))
@@ -156,6 +324,9 @@ def test_tdhook_workflows_fail_before_planning_without_occurrence_evidence() -> 
 def test_internal_axes_cannot_relabel_environment_time_or_unrelated_state() -> None:
     interaction = _interaction()
     contract = interaction.contract
+
+    with pytest.raises(ValueError, match="requires recurrent semantics"):
+        replace(contract, recurrent=None)
 
     with pytest.raises(ValueError, match="distinct from environment/sequence time"):
         recurrent_with_time = RecurrentSemantics(
