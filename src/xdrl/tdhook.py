@@ -176,8 +176,8 @@ class TDHookWorkflowPairManifest:
             arms.append(
                 WorkflowArmReference(
                     provenance_sha256=arm["provenance_sha256"],
-                    input_artifacts=tuple(arm["input_artifacts"]),
-                    output_artifacts=tuple(arm["output_artifacts"]),
+                    input_artifacts=_decoded_string_array(arm["input_artifacts"], f"{name}.input_artifacts"),
+                    output_artifacts=_decoded_string_array(arm["output_artifacts"], f"{name}.output_artifacts"),
                 )
             )
         return cls(
@@ -189,8 +189,10 @@ class TDHookWorkflowPairManifest:
             changed_steps=tuple(WorkflowStepDifference(**item) for item in changed_steps),
             baseline=arms[0],
             intervention=arms[1],
-            matched_rng_sources=tuple(payload["matched_rng_sources"]),
-            unsupported_randomness_sources=tuple(payload["unsupported_randomness_sources"]),
+            matched_rng_sources=_decoded_string_array(payload["matched_rng_sources"], "matched_rng_sources"),
+            unsupported_randomness_sources=_decoded_string_array(
+                payload["unsupported_randomness_sources"], "unsupported_randomness_sources"
+            ),
             interpretation=payload["interpretation"],
         )
 
@@ -393,7 +395,10 @@ class TDHookWorkflowRunner:
 
         initial_rng = _rng_state()
         final_rng = initial_rng
-        module_state = _ModuleStateSnapshot.capture(self.interaction.module)
+        module_states = tuple(
+            (module, _ModuleStateSnapshot.capture(module))
+            for module in _paired_state_modules(self.interaction.module, baseline_workflow, intervention_workflow)
+        )
         baseline: TDHookWorkflowResult | None = None
         arm = "baseline"
         try:
@@ -410,7 +415,7 @@ class TDHookWorkflowRunner:
                 callback_identifiers=callback_identifiers,
             )
             final_rng = _rng_state()
-            module_state.restore(self.interaction.module)
+            _restore_module_states(module_states)
             _set_rng_state(initial_rng)
             arm = "intervention"
             intervention = other.run(
@@ -428,7 +433,7 @@ class TDHookWorkflowRunner:
         except Exception as error:
             raise PairedWorkflowExecutionError(arm, baseline=baseline) from error
         finally:
-            module_state.restore(self.interaction.module)
+            _restore_module_states(module_states)
             _set_rng_state(final_rng)
 
         manifest = TDHookWorkflowPairManifest(
@@ -507,6 +512,12 @@ def _configured_step_description(description: object) -> str:
         return json.dumps(to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
     except (TypeError, ValueError) as error:
         raise TypeError("TDHook configured-step description must be JSON-compatible") from error
+
+
+def _decoded_string_array(value: object, field: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise TypeError(f"{field} must be an array")
+    return tuple(value)
 
 
 def _workflow_descriptions(
@@ -606,11 +617,14 @@ def _validate_pair_contract(
         raise PairedWorkflowValidationError("paired workflows require identical interaction contracts")
     if baseline.interaction.module is not intervention.interaction.module:
         raise PairedWorkflowValidationError("paired workflows must execute against the same module instance")
+    if baseline.interaction is not intervention.interaction:
+        raise PairedWorkflowValidationError("paired workflows require the same runtime interaction context")
 
 
 @dataclass(frozen=True, slots=True)
 class _ModuleStateSnapshot:
     state: Mapping[str, torch.Tensor]
+    buffers: Mapping[str, torch.Tensor]
     training: tuple[bool, ...]
     gradients: tuple[torch.Tensor | None, ...]
 
@@ -618,6 +632,7 @@ class _ModuleStateSnapshot:
     def capture(cls, module: torch.nn.Module) -> _ModuleStateSnapshot:
         return cls(
             {name: value.detach().clone() for name, value in module.state_dict().items()},
+            {name: value.detach().clone() for name, value in module.named_buffers()},
             tuple(child.training for child in module.modules()),
             tuple(
                 parameter.grad.detach().clone() if parameter.grad is not None else None
@@ -627,6 +642,12 @@ class _ModuleStateSnapshot:
 
     def restore(self, module: torch.nn.Module) -> None:
         module.load_state_dict(self.state, strict=True)
+        current_buffers = dict(module.named_buffers())
+        if set(current_buffers) != set(self.buffers):
+            raise RuntimeError("paired workflow changed the module buffer structure")
+        with torch.no_grad():
+            for name, value in self.buffers.items():
+                current_buffers[name].copy_(value)
         children = tuple(module.modules())
         if len(children) != len(self.training):
             raise RuntimeError("paired workflow changed the module hierarchy")
@@ -637,6 +658,25 @@ class _ModuleStateSnapshot:
             raise RuntimeError("paired workflow changed the module parameter structure")
         for parameter, gradient in zip(parameters, self.gradients, strict=True):
             parameter.grad = gradient.detach().clone() if gradient is not None else None
+
+
+def _paired_state_modules(
+    interaction_module: torch.nn.Module,
+    baseline: Workflow,
+    intervention: Workflow,
+) -> tuple[torch.nn.Module, ...]:
+    modules = [interaction_module]
+    for workflow in (baseline, intervention):
+        for wrapped_step in workflow.steps:
+            step = wrapped_step.step if isinstance(wrapped_step, WorkflowUpdate) else wrapped_step
+            if isinstance(step, TensorDictModuleBase) and all(step is not existing for existing in modules):
+                modules.append(step)
+    return tuple(modules)
+
+
+def _restore_module_states(states: tuple[tuple[torch.nn.Module, _ModuleStateSnapshot], ...]) -> None:
+    for module, snapshot in reversed(states):
+        snapshot.restore(module)
 
 
 def _rng_state() -> tuple[torch.Tensor, list[torch.Tensor] | None]:

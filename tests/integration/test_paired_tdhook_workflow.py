@@ -6,7 +6,7 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from tdhook.latent import ActivationCaching, SteeringVectors
 from tdhook.weights import Pruning
-from tdhook.workflow import Workflow
+from tdhook.workflow import Workflow, WorkflowUpdate
 
 from xdrl.interactions import InteractionContract, InteractionPhase, RuntimeInteractionContext
 from xdrl.provenance import (
@@ -28,7 +28,7 @@ from xdrl.tdhook import (
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
 
-def _runner(*, stochastic: bool = False) -> TDHookWorkflowRunner:
+def _runner(*, stochastic: bool = False, layer: torch.nn.Module | None = None) -> TDHookWorkflowRunner:
     inputs = TensorDictSchema(
         (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),),
         BatchSemantics(("env",)),
@@ -37,12 +37,12 @@ def _runner(*, stochastic: bool = False) -> TDHookWorkflowRunner:
         (KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),),
         BatchSemantics(("env",)),
     )
-    layer: torch.nn.Module
-    if stochastic:
-        layer = torch.nn.Sequential(torch.nn.Dropout(p=0.5), torch.nn.Linear(2, 1, bias=False))
-    else:
-        layer = torch.nn.Linear(2, 1, bias=False)
-    linear = layer[-1] if stochastic else layer
+    if layer is None:
+        if stochastic:
+            layer = torch.nn.Sequential(torch.nn.Dropout(p=0.5), torch.nn.Linear(2, 1, bias=False))
+        else:
+            layer = torch.nn.Linear(2, 1, bias=False)
+    linear = layer[-1] if isinstance(layer, torch.nn.Sequential) else layer
     assert isinstance(linear, torch.nn.Linear)
     with torch.no_grad():
         linear.weight.copy_(torch.tensor([[2.0, -1.0]]))
@@ -319,6 +319,14 @@ def test_pair_manifest_rejects_invalid_values(factory: object, message: str) -> 
         ({}, "missing or unknown fields"),
         ({**_manifest().to_dict(), "changed_steps": "invalid"}, "changed_steps must be an array"),
         ({**_manifest().to_dict(), "baseline": {}}, "baseline arm reference"),
+        (
+            {
+                **_manifest().to_dict(),
+                "baseline": {**_manifest().to_dict()["baseline"], "input_artifacts": "artifact"},
+            },
+            "baseline.input_artifacts must be an array",
+        ),
+        ({**_manifest().to_dict(), "matched_rng_sources": "torch_cpu"}, "matched_rng_sources must be an array"),
     ],
 )
 def test_pair_manifest_decoder_rejects_invalid_payloads(payload: object, message: str) -> None:
@@ -393,6 +401,23 @@ def test_pair_rejects_missing_identity_contract_drift_and_a_different_module() -
             intervention_runner=different_module,
         )
 
+    separate_context = TDHookWorkflowRunner(
+        RuntimeInteractionContext(
+            runner.interaction.contract,
+            runner.interaction.module,
+            data,
+        )
+    )
+    with pytest.raises(PairedWorkflowValidationError, match="same runtime interaction context"):
+        runner.run_paired(
+            _cache(),
+            _cache(),
+            data,
+            pair_id="pair:different-context",
+            code_revision="test-revision",
+            intervention_runner=separate_context,
+        )
+
 
 @pytest.mark.integration
 def test_pair_rejects_unshared_tensordict_operators() -> None:
@@ -408,3 +433,66 @@ def test_pair_rejects_unshared_tensordict_operators() -> None:
             pair_id="pair:operators",
             code_revision="test-revision",
         )
+
+
+class _MutatingLinear(torch.nn.Linear):
+    def __init__(self) -> None:
+        super().__init__(2, 1, bias=False)
+        self.register_buffer("counter", torch.zeros((), dtype=torch.int64), persistent=False)
+        self.seen: list[int] = []
+
+    def forward(self, value: torch.Tensor) -> torch.Tensor:
+        self.counter.add_(1)
+        self.seen.append(int(self.counter))
+        return super().forward(value)
+
+
+class _MutatingIdentity(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.register_buffer("counter", torch.zeros((), dtype=torch.int64), persistent=False)
+        self.seen: list[int] = []
+
+    def forward(self, value: torch.Tensor) -> torch.Tensor:
+        self.counter.add_(1)
+        self.seen.append(int(self.counter))
+        return value
+
+
+@pytest.mark.integration
+def test_pair_restores_nonpersistent_interaction_buffers_between_arms_and_afterward() -> None:
+    layer = _MutatingLinear()
+    runner = _runner(layer=layer)
+
+    pair = runner.run_paired(
+        _cache(),
+        _cache(),
+        runner.interaction.representative_input,
+        pair_id="pair:nonpersistent-buffer",
+        code_revision="test-revision",
+    )
+
+    torch.testing.assert_close(pair.baseline.data["action"], pair.intervention.data["action"])
+    assert layer.seen == [1, 1]
+    assert not layer.counter
+
+
+@pytest.mark.integration
+def test_pair_restores_shared_operator_state_between_arms_and_afterward() -> None:
+    runner = _runner()
+    layer = _MutatingIdentity()
+    operator = TensorDictModule(layer, in_keys=["observation"], out_keys=["observation"])
+    baseline = Workflow(WorkflowUpdate(operator), ActivationCaching("module"))
+    intervention = Workflow(WorkflowUpdate(operator), ActivationCaching("module"))
+
+    pair = runner.run_paired(
+        baseline,
+        intervention,
+        runner.interaction.representative_input,
+        pair_id="pair:stateful-operator",
+        code_revision="test-revision",
+    )
+
+    torch.testing.assert_close(pair.baseline.data["action"], pair.intervention.data["action"])
+    assert layer.seen == [1, 1]
+    assert not layer.counter
