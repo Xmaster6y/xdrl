@@ -76,8 +76,20 @@ Reproductions
 
       **Evidence status:** bounded smoke path only; paper-exact assets unavailable.
 
+   .. grid-item-card:: Goal representations in Procgen Maze
+      :link: reproductions/maze-policy-goal-representations
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`goal;2em;sd-text-primary`
+
+      Reported-channel localization, declared controls, and matched steering effects.
+
+      **Evidence status:** bounded smoke path only; checkpoint provenance is incomplete.
+
 .. toctree::
    :hidden:
 
    reproductions/bixrl-functional-modularity.ipynb
    reproductions/emergent-planning-sokoban.ipynb
+   reproductions/maze-policy-goal-representations.ipynb
