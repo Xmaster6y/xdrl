@@ -65,7 +65,19 @@ Reproductions
 
       **Evidence status:** bounded smoke path only; no scientific agreement claim.
 
+   .. grid-item-card:: Emergent planning in Sokoban
+      :link: reproductions/emergent-planning-sokoban
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`iterations;2em;sd-text-primary`
+
+      Exact DRC occurrences, spatial probes, and matched intervention controls.
+
+      **Evidence status:** bounded smoke path only; paper-exact assets unavailable.
+
 .. toctree::
    :hidden:
 
    reproductions/bixrl-functional-modularity.ipynb
+   reproductions/emergent-planning-sokoban.ipynb
