@@ -12,6 +12,31 @@ from enum import Enum
 from xdrl.types import ModelRole, TensorDictKey
 
 
+__all__ = [
+    "AgentIdentity",
+    "AgentSelector",
+    "CoalitionTerm",
+    "InteractionPhase",
+    "InteractionTopology",
+    "InternalComputationAxis",
+    "InternalComputationSemantics",
+    "InternalCoordinate",
+    "InternalOccurrence",
+    "InternalOccurrenceSelection",
+    "LifecycleEventType",
+    "MultiAgentSemantics",
+    "NamedReduction",
+    "OccurrenceIdentityError",
+    "RecurrentCollectorMode",
+    "RecurrentSemantics",
+    "RecurrentStateTransition",
+    "SemanticTarget",
+    "ValueDecompositionAxes",
+    "ValueDecompositionKeys",
+    "ValueDecompositionSemantics",
+]
+
+
 class InteractionPhase(str, Enum):
     """Where an RL model invocation occurs."""
 
@@ -213,10 +238,10 @@ class RecurrentSemantics:
     def __post_init__(self) -> None:
         if not self.transitions:
             raise ValueError("recurrent semantics require at least one state transition")
-        if self.burn_in < 0:
-            raise ValueError("burn_in must be non-negative")
-        if self.truncated_window is not None and self.truncated_window < 1:
-            raise ValueError("truncated_window must be positive")
+        if type(self.burn_in) is not int or self.burn_in < 0:
+            raise ValueError("burn_in must be a non-negative integer")
+        if self.truncated_window is not None and (type(self.truncated_window) is not int or self.truncated_window < 1):
+            raise ValueError("truncated_window must be a positive integer")
         if self.truncated_window is not None and self.burn_in >= self.truncated_window:
             raise ValueError("burn_in must be smaller than truncated_window")
         supported = {
@@ -399,8 +424,8 @@ class MultiAgentSemantics:
     def __post_init__(self) -> None:
         if not self.group:
             raise ValueError("multi-agent group must be non-empty")
-        if self.n_agents < 1:
-            raise ValueError("n_agents must be positive")
+        if type(self.n_agents) is not int or self.n_agents < 1:
+            raise ValueError("n_agents must be a positive integer")
         if self.target.selector.group != self.group:
             raise ValueError("semantic target group must match the multi-agent group")
         if self.agent_identities:
@@ -411,9 +436,8 @@ class MultiAgentSemantics:
             if any(type(agent) not in {str, int} or agent == "" for agent in self.agent_identities):
                 raise TypeError("agent identities must be non-empty strings or integers")
         if self.agent_identities:
-            declared = set(self.agent_identities)
             for agent in self.target.selector.agents:
-                if agent not in declared:
+                if not any(type(agent) is type(identity) and agent == identity for identity in self.agent_identities):
                     raise ValueError(f"agent identity {agent!r} is outside the declared agent group")
         else:
             for agent in self.target.selector.agents:

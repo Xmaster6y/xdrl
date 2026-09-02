@@ -24,7 +24,8 @@ def tensor_digest(tensor: torch.Tensor) -> str:
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
-    return bytes_digest(header + value.numpy().tobytes())
+    storage_bytes = value.reshape(-1).view(torch.uint8).numpy().tobytes()
+    return bytes_digest(header + storage_bytes)
 
 
 def named_tensor_digest(named_tensors: Iterable[tuple[str, torch.Tensor]]) -> str:
@@ -39,7 +40,8 @@ def named_tensor_digest(named_tensors: Iterable[tuple[str, torch.Tensor]]) -> st
 
 def module_digest(module: torch.nn.Module) -> str:
     """Hash a module's named parameters and buffers deterministically."""
-    return named_tensor_digest(module.state_dict().items())
+    tensor_state = ((name, value) for name, value in module.state_dict().items() if isinstance(value, torch.Tensor))
+    return named_tensor_digest(tensor_state)
 
 
 def repository_revision(path: str | Path | None = None) -> str:
