@@ -40,10 +40,20 @@ Tutorials
 
       Record semantic coordinates for calls to a reused module.
 
+   .. grid-item-card:: End-to-end policy investigation
+      :link: notebooks/end-to-end-policy-investigation
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`workflow;2em;sd-text-primary`
+
+      Connect competence, attribution, matched interventions, and behavior.
+
 .. toctree::
    :hidden:
 
    notebooks/collection.ipynb
+   notebooks/end-to-end-policy-investigation.ipynb
    notebooks/internal-computation.ipynb
    notebooks/intervention.ipynb
    notebooks/workflow-evidence.ipynb
