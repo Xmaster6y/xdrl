@@ -44,6 +44,11 @@ class KeyRole(str, Enum):
     LOG_PROBABILITY = "log_probability"
     DISTRIBUTION_PARAMETER = "distribution_parameter"
     VALUE = "value"
+    INDIVIDUAL_VALUE = "individual_value"
+    COALITION_CONTRIBUTION = "coalition_contribution"
+    SEMANTIC_MASK = "semantic_mask"
+    MIXER_INPUT = "mixer_input"
+    JOINT_VALUE = "joint_value"
     FEATURE = "feature"
 
 
