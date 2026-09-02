@@ -1914,8 +1914,8 @@ wheels = [
 
 [[package]]
 name = "torchrl"
-version = "0.13.0+gae421b98"
-source = { git = "https://github.com/pytorch/rl?branch=main#ae421b98d0dba86e5ab0b24917d1e64f376ee6f9" }
+version = "0.14.0+g7f2517be"
+source = { git = "https://github.com/pytorch/rl?branch=main#7f2517be11078f9e534c911a765c9e0b6fdb8192" }
 dependencies = [
     { name = "cloudpickle" },
     { name = "hoptorch" },
