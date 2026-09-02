@@ -1,548 +1,106 @@
-"""Typed contracts and execution contexts for TorchRL model invocations.
-
-An :class:`InteractionContract` is the single immutable declaration of the
-live TensorDict schemas and RL execution semantics. Its serialised projection
-is tensor-free; the runtime context owns only the module, representative batch,
-and temporary execution state needed to invoke that module safely.
-"""
+"""One typed execution boundary around an existing TorchRL module."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
-from dataclasses import asdict, dataclass, field
-from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Protocol
+from dataclasses import dataclass
 
 import torch
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
 from torchrl.envs.utils import set_exploration_type
 
-from xdrl.interventions import InterventionTiming
-from xdrl.semantics import (
-    AgentSelector,
-    CoalitionTerm,
-    InteractionPhase,
-    InteractionTopology,
-    InternalComputationAxis,
-    InternalComputationSemantics,
-    InternalOccurrence,
-    InternalOccurrenceSelection,
-    LifecycleEventType,
-    MultiAgentSemantics,
-    NamedReduction,
-    OccurrenceIdentityError,
-    RecurrentCollectorMode,
-    RecurrentSemantics,
-    RecurrentStateTransition,
-    SemanticTarget,
-    ValueDecompositionAxes,
-    ValueDecompositionKeys,
-    ValueDecompositionSemantics,
-)
-from xdrl.types import KeyPresence, KeyRole, ModelRole, TensorDictKey, TensorDictSchema
-
-if TYPE_CHECKING:
-    from xdrl.interventions import InterventionController
-    from xdrl.observations import ObservationTrace
-
-
-__all__ = [
-    "AgentSelector",
-    "CoalitionTerm",
-    "HookContextFactory",
-    "InteractionContract",
-    "InteractionPhase",
-    "InteractionTopology",
-    "InternalComputationAxis",
-    "InternalComputationSemantics",
-    "InternalOccurrence",
-    "InternalOccurrenceSelection",
-    "LifecycleEvent",
-    "LifecycleEventType",
-    "MultiAgentSemantics",
-    "NamedReduction",
-    "OccurrenceIdentityError",
-    "RecurrentCollectorMode",
-    "RecurrentSemantics",
-    "RecurrentStateTransition",
-    "RuntimeInteractionContext",
-    "SemanticTarget",
-    "ValueDecompositionAxes",
-    "ValueDecompositionKeys",
-    "ValueDecompositionSemantics",
-]
+from xdrl.types import BatchSemantics, KeyRole, ModelRole, TensorDictKey, TensorDictSchema
 
 
 @dataclass(frozen=True, slots=True)
-class _KeySnapshot:
-    """Serialisable description of one declared TensorDict key."""
+class RecurrentStateTransition:
+    """A state key consumed now and its corresponding next-state key."""
 
-    path: tuple[str, ...]
-    role: str
-    presence: str
-    feature_shape: tuple[int, ...] | None
-    spec_type: str | None
-    spec_constraints: Mapping[str, Any] | None
+    input_key: TensorDictKey
+    output_key: TensorDictKey
 
 
 @dataclass(frozen=True, slots=True)
-class _SchemaSnapshot:
-    """Serialisable projection of a :class:`TensorDictSchema`."""
+class RecurrentSemantics:
+    """The recurrent state and reset keys that affect boundary validation."""
 
-    keys: tuple[_KeySnapshot, ...]
-    batch_dimensions: tuple[str, ...]
-
-    @classmethod
-    def from_schema(cls, schema: TensorDictSchema) -> _SchemaSnapshot:
-        return cls(
-            keys=tuple(
-                _KeySnapshot(
-                    path=_key_path(entry.key),
-                    role=entry.role.value,
-                    presence=entry.presence.value,
-                    feature_shape=tuple(entry.spec.shape) if entry.spec is not None else None,
-                    spec_type=type(entry.spec).__name__ if entry.spec is not None else None,
-                    spec_constraints=_spec_constraints(entry.spec) if entry.spec is not None else None,
-                )
-                for entry in schema.keys
-            ),
-            batch_dimensions=schema.batch.dimensions,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class InteractionContract:
-    """Canonical immutable schemas and semantics for one model interaction.
-
-    ``identity`` must be stable within one recorded run.  Events for a given
-    identity are ordered by their monotonically increasing ``order`` field.
-    """
-
-    identity: str
-    role: ModelRole
-    phase: InteractionPhase
-    module_path: str
-    input_schema: TensorDictSchema
-    output_schema: TensorDictSchema
-    environment: str | None = None
-    time_dimension: str | None = None
-    agent_dimension: str | None = None
-    objective: str | None = None
-    exploration_mode: str | None = None
-    gradient_enabled: bool = False
-    inference_mode: bool = False
-    autocast_device_type: str | None = None
-    autocast_enabled: bool = False
-    logical_step: int | None = None
-    episode_id: str | int | None = None
-    trajectory_id: str | int | None = None
-    model_id: str | None = None
-    checkpoint_id: str | None = None
-    module_training: bool | None = None
-    recurrent: RecurrentSemantics | None = None
-    multi_agent: MultiAgentSemantics | None = None
-    value_decomposition: ValueDecompositionSemantics | None = None
-    internal_computation: InternalComputationSemantics | None = None
+    transitions: tuple[RecurrentStateTransition, ...]
+    reset_keys: tuple[TensorDictKey, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.identity:
-            raise ValueError("interaction identity must be non-empty")
-        if not self.module_path:
-            raise ValueError("interaction module_path must be non-empty")
+        if not self.transitions:
+            raise ValueError("recurrent semantics require at least one state transition")
+        input_paths = tuple(_key_path(item.input_key) for item in self.transitions)
+        output_paths = tuple(_key_path(item.output_key) for item in self.transitions)
+        reset_paths = tuple(_key_path(key) for key in self.reset_keys)
+        if len(set(input_paths)) != len(input_paths) or len(set(output_paths)) != len(output_paths):
+            raise ValueError("recurrent state transition keys must be unique")
+        if len(set(reset_paths)) != len(reset_paths):
+            raise ValueError("recurrent reset keys must be unique")
+
+
+@dataclass(frozen=True, slots=True)
+class InteractionSpec:
+    """The complete static contract for one TorchRL module call."""
+
+    role: ModelRole
+    inputs: TensorDictSchema
+    outputs: TensorDictSchema
+    batch: BatchSemantics = BatchSemantics()
+    recurrent: RecurrentSemantics | None = None
+    training: bool | None = None
+    gradient_enabled: bool = False
+    inference_mode: bool = False
+    exploration_mode: str | None = None
+    autocast_device_type: str | None = None
+    autocast_enabled: bool = False
+
+    def __post_init__(self) -> None:
         if self.inference_mode and self.gradient_enabled:
             raise ValueError("inference_mode and gradient_enabled cannot both be enabled")
         if self.autocast_enabled and self.autocast_device_type is None:
             raise ValueError("autocast_enabled requires autocast_device_type")
-        if self.input_schema.batch != self.output_schema.batch:
-            raise ValueError("input and output schemas must declare identical batch semantics")
+        if self.training is not None and type(self.training) is not bool:
+            raise TypeError("training must be a boolean or None")
         if self.recurrent is not None:
-            _validate_recurrent_contract(self)
-        if self.multi_agent is not None:
-            _validate_multi_agent_contract(self)
-        if self.value_decomposition is not None:
-            _validate_value_decomposition_contract(self)
-        if self.internal_computation is not None:
-            _validate_internal_computation_contract(self)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-compatible tensor-free projection of this contract."""
-        return {
-            "identity": self.identity,
-            "role": self.role.value,
-            "phase": self.phase.value,
-            "module_path": self.module_path,
-            "input_schema": asdict(_SchemaSnapshot.from_schema(self.input_schema)),
-            "output_schema": asdict(_SchemaSnapshot.from_schema(self.output_schema)),
-            "batch_dimensions": self.batch_dimensions,
-            "environment": self.environment,
-            "time_dimension": self.time_dimension,
-            "agent_dimension": self.agent_dimension,
-            "objective": self.objective,
-            "exploration_mode": self.exploration_mode,
-            "gradient_enabled": self.gradient_enabled,
-            "inference_mode": self.inference_mode,
-            "autocast_device_type": self.autocast_device_type,
-            "autocast_enabled": self.autocast_enabled,
-            "logical_step": self.logical_step,
-            "episode_id": self.episode_id,
-            "trajectory_id": self.trajectory_id,
-            "model_id": self.model_id,
-            "checkpoint_id": self.checkpoint_id,
-            "module_training": self.module_training,
-            "recurrent": asdict(self.recurrent) if self.recurrent is not None else None,
-            "multi_agent": asdict(self.multi_agent) if self.multi_agent is not None else None,
-            "value_decomposition": (
-                asdict(self.value_decomposition) if self.value_decomposition is not None else None
-            ),
-            "internal_computation": (
-                asdict(self.internal_computation) if self.internal_computation is not None else None
-            ),
-        }
-
-    @property
-    def batch_dimensions(self) -> tuple[str, ...]:
-        """Return the single batch declaration shared by both schemas."""
-        return self.input_schema.batch.dimensions
-
-
-@dataclass(frozen=True, slots=True)
-class LifecycleEvent:
-    """A tensor-free record of one attempted module invocation."""
-
-    order: int
-    kind: LifecycleEventType
-    interaction_id: str
-    phase: InteractionPhase
-    module_path: str
-    key_shapes: Mapping[str, tuple[int, ...] | None]
-    error: str | None = None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "key_shapes", MappingProxyType(dict(self.key_shapes)))
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-compatible event representation."""
-        return {
-            "order": self.order,
-            "kind": self.kind.value,
-            "interaction_id": self.interaction_id,
-            "phase": self.phase.value,
-            "module_path": self.module_path,
-            "key_shapes": dict(self.key_shapes),
-            "error": self.error,
-        }
-
-
-class HookContextFactory(Protocol):
-    """Create a context manager that installs temporary TDHook state."""
-
-    def __call__(self) -> Any: ...
+            _validate_recurrent_spec(self)
 
 
 @dataclass(slots=True)
-class RuntimeInteractionContext:
-    """Ephemeral execution wrapper around one existing TensorDict module.
+class Interaction:
+    """Validate and execute one unchanged TensorDict module.
 
-    Construction validates the supplied representative input.  ``invoke``
-    validates the live input/output around the actual module call and records
-    lifecycle metadata.  The module itself, tensors, and hook state never
-    enter :class:`InteractionContract` or :class:`LifecycleEvent`.
+    XDRL owns only this boundary. TensorDict and TorchRL own the data and model;
+    TDHook owns model-internal hooks, targets, and workflow execution.
     """
 
-    contract: InteractionContract
     module: TensorDictModuleBase
-    representative_input: TensorDictBase
-    hook_context_factory: HookContextFactory | None = None
-    observations: ObservationTrace | None = None
-    interventions: InterventionController | None = None
-    events: list[LifecycleEvent] = field(default_factory=list, init=False)
-    _stack: ExitStack | None = field(default=None, init=False, repr=False)
-    _observing_module_calls: bool = field(default=False, init=False, repr=False)
-    _observing_internal_computation: bool = field(default=False, init=False, repr=False)
+    spec: InteractionSpec
 
     def __post_init__(self) -> None:
-        self.input_schema.validate_inputs(self.representative_input)
-        self._validate_recurrent_input(self.representative_input)
-        if self.interventions is not None:
-            self.interventions.validate(self)
+        if not isinstance(self.module, TensorDictModuleBase):
+            raise TypeError("Interaction requires a TensorDictModuleBase")
 
-    @property
-    def input_schema(self) -> TensorDictSchema:
-        """Return the contract's canonical input schema."""
-        return self.contract.input_schema
+    def __call__(self, data: TensorDictBase) -> TensorDictBase:
+        """Validate and execute the module once."""
 
-    @property
-    def output_schema(self) -> TensorDictSchema:
-        """Return the contract's canonical output schema."""
-        return self.contract.output_schema
+        return self._invoke(data, self.module)
 
-    def __enter__(self) -> RuntimeInteractionContext:
-        if self._stack is not None:
-            raise RuntimeError("interaction context is already active")
-        stack = ExitStack()
-        try:
-            if self.contract.module_training is not None:
-                _set_training_mode(stack, self.module, self.contract.module_training)
-            if self.contract.exploration_mode is not None:
-                stack.enter_context(set_exploration_type(self.contract.exploration_mode))
-            stack.enter_context(torch.inference_mode(self.contract.inference_mode))
-            if not self.contract.inference_mode:
-                stack.enter_context(torch.set_grad_enabled(self.contract.gradient_enabled))
-            if self.contract.autocast_device_type is not None:
-                stack.enter_context(
-                    torch.autocast(
-                        device_type=self.contract.autocast_device_type,
-                        enabled=self.contract.autocast_enabled,
-                    )
-                )
-            if self.hook_context_factory is not None:
-                stack.enter_context(self.hook_context_factory())
-        except BaseException:
-            stack.close()
-            raise
-        self._stack = stack
-        return self
-
-    def __call__(self, tensordict: TensorDictBase) -> TensorDictBase:
-        """Run one interaction, making the context usable as a synchronous policy.
-
-        This one-shot form is suitable for direct calls, deterministic rollouts,
-        and local :class:`~torchrl.collectors.SyncDataCollector` policies. Keep
-        the context open explicitly when hooks must remain installed through a
-        subsequent backward pass.
-        """
-        with self:
-            return self.invoke(tensordict)
-
-    def __exit__(self, *exc_info: object) -> bool | None:
-        if self._stack is None:
-            return None
-        stack, self._stack = self._stack, None
-        return stack.__exit__(*exc_info)
-
-    def invoke(self, tensordict: TensorDictBase, *, module: TensorDictModuleBase | None = None) -> TensorDictBase:
-        """Invoke the wrapped module and append before/after/failure events."""
-        if self._stack is None:
-            raise RuntimeError("invoke must be called inside the interaction context")
-        invoked_module = self.module if module is None else module
-        if self._observing_internal_computation and invoked_module is not self.module:
-            raise OccurrenceIdentityError(
-                "module overrides are unsupported while observing internal computation; "
-                "occurrence hooks are bound to the declared root module"
-            )
-        if module is not None and module is not self.module and self.contract.module_training is not None:
-            _set_training_mode(self._stack, invoked_module, self.contract.module_training)
-        return self.invoke_callable(tensordict, invoked_module)
-
-    def invoke_callable(
-        self,
-        tensordict: TensorDictBase,
-        operation: Callable[[TensorDictBase], TensorDictBase],
-        *,
-        module: object | None = None,
-    ) -> TensorDictBase:
-        """Invoke one TensorDict operation through this interaction's live contract.
-
-        This is the execution boundary used when another library owns the
-        model wrapper, as TDHook does for planned method calls.  The context
-        must already be active so execution modes and cleanup remain owned by
-        the surrounding interaction.
-        """
-        if self._stack is None:
-            raise RuntimeError("invoke_callable must be called inside the interaction context")
-        if self._observing_internal_computation and operation is not self.module:
-            raise OccurrenceIdentityError(
-                "callable overrides are unsupported while observing internal computation; "
-                "occurrence hooks are bound to the declared root module"
-            )
-        if module is not None and module is not self.module and self.contract.module_training is not None:
-            _set_training_mode(self._stack, module, self.contract.module_training)
-        current = self._before_call(tensordict)
-        try:
-            result = operation(current)
-        except BaseException as error:
-            self._record(LifecycleEventType.FAILURE, current, error)
-            raise
-        return self._after_call(current, result)
-
-    @contextmanager
-    def observe_module_calls(self) -> Iterator[None]:
-        """Validate every root-module call made by another execution owner.
-
-        TDHook workflows must receive the original module so their model-relative
-        targets and binding facts remain unchanged. Temporary public root hooks
-        let XDRL observe each actual model pass without wrapping the module or
-        changing its class.
-        """
-        if self._stack is None:
-            raise RuntimeError("observe_module_calls requires an active interaction context")
-        if self._observing_module_calls:
-            raise RuntimeError("module-call observation is already active")
-        pending: list[TensorDictBase] = []
-
-        def before(_module: torch.nn.Module, args: tuple[object, ...]) -> tuple[object, ...]:
-            if _module is not self.module:
-                return args
-            if len(args) != 1 or not isinstance(args[0], TensorDictBase):
-                raise TypeError("observed model calls require one positional TensorDict argument")
-            current = self._before_call(args[0])
-            pending.append(current)
-            return (current,)
-
-        def after(_module: torch.nn.Module, _args: tuple[object, ...], result: object) -> TensorDictBase:
-            if _module is not self.module:
-                if not isinstance(result, TensorDictBase):
-                    raise TypeError(f"TDHook wrapper must return a TensorDict, got {type(result).__name__}")
-                return result
-            if not pending:
-                raise RuntimeError("observed model call completed without a matching input")
-            current = pending.pop()
-            if not isinstance(result, TensorDictBase):
-                error = TypeError(f"observed model call must return a TensorDict, got {type(result).__name__}")
-                self._record(LifecycleEventType.FAILURE, current, error)
-                raise error
-            return self._after_call(current, result)
-
-        self._observing_module_calls = True
-        pre_handle = self.module.register_forward_pre_hook(before, prepend=True)
-        post_handle = self.module.register_forward_hook(after)
-        try:
-            yield
-        except BaseException as error:
-            while pending:
-                self._record(LifecycleEventType.FAILURE, pending.pop(), error)
-            raise
-        finally:
-            post_handle.remove()
-            pre_handle.remove()
-            self._observing_module_calls = False
-
-    @contextmanager
-    def observe_internal_computation(self) -> Iterator[None]:
-        """Record exact declared internal occurrences for every root call.
-
-        Public PyTorch forward hooks provide the raw call index. The contract
-        provides its semantic layer/tick coordinates. Missing, extra, or
-        reordered calls fail before the root call returns successfully.
-        """
-        semantics = self.contract.internal_computation
-        if semantics is None:
-            raise RuntimeError("interaction does not declare internal-computation semantics")
-        if self._stack is None:
-            raise RuntimeError("observe_internal_computation requires an active interaction context")
-        if self._observing_internal_computation:
-            raise RuntimeError("internal-computation observation is already active")
-
-        expected = {(item.module_path, item.call_index): item for item in semantics.occurrences}
-        expected_counts: dict[str, int] = {}
-        for occurrence in semantics.occurrences:
-            expected_counts[occurrence.module_path] = max(
-                expected_counts.get(occurrence.module_path, 0), occurrence.call_index + 1
-            )
-        counts: dict[str, int] = {}
-        in_root_call = False
-        handles: list[torch.utils.hooks.RemovableHandle] = []
-
-        def root_before(_module: torch.nn.Module, _args: tuple[object, ...]) -> None:
-            nonlocal in_root_call
-            if in_root_call:
-                raise OccurrenceIdentityError("nested root calls make internal occurrence identity ambiguous")
-            counts.clear()
-            in_root_call = True
-
-        def root_after(_module: torch.nn.Module, _args: tuple[object, ...], output: object) -> object:
-            nonlocal in_root_call
-            try:
-                if counts != expected_counts:
-                    raise OccurrenceIdentityError(
-                        f"internal occurrence counts mismatch: expected {expected_counts!r}, observed {counts!r}"
-                    )
-                return output
-            finally:
-                in_root_call = False
-
-        def internal_after(path: str) -> Callable[[torch.nn.Module, tuple[object, ...], object], object]:
-            def hook(_module: torch.nn.Module, _args: tuple[object, ...], output: object) -> object:
-                if not in_root_call:
-                    raise OccurrenceIdentityError("internal target was called outside the declared root interaction")
-                call_index = counts.get(path, 0)
-                counts[path] = call_index + 1
-                occurrence = expected.get((path, call_index))
-                if occurrence is None:
-                    raise OccurrenceIdentityError(f"undeclared internal occurrence {path!r} call_index={call_index}")
-                tensor = _single_tensor_output(output, path)
-                if self.observations is not None:
-                    from xdrl.observations import HookDirection, ObservationKind
-
-                    self.observations.observe_tensor(
-                        self.contract,
-                        tensor,
-                        kind=ObservationKind.ACTIVATION,
-                        target=path,
-                        direction=HookDirection.OUTPUT,
-                        occurrence=occurrence,
-                    )
-                return output
-
-            return hook
-
-        self._observing_internal_computation = True
-        try:
-            handles.append(self.module.register_forward_pre_hook(root_before, prepend=True))
-            handles.append(self.module.register_forward_hook(root_after))
-            for path in expected_counts:
-                try:
-                    target = self.module.get_submodule(path)
-                except AttributeError as error:
-                    raise OccurrenceIdentityError(
-                        f"internal occurrence module path {path!r} does not exist"
-                    ) from error
-                handles.append(target.register_forward_hook(internal_after(path)))
-            yield
-        finally:
-            for handle in reversed(handles):
-                handle.remove()
-            self._observing_internal_computation = False
-
-    def _before_call(self, tensordict: TensorDictBase) -> TensorDictBase:
-        self._record(LifecycleEventType.BEFORE, tensordict)
-        try:
-            self.input_schema.validate_inputs(tensordict)
-            if self.interventions is not None:
-                tensordict = self.interventions.apply(self, tensordict, InterventionTiming.INPUT)
-            self._validate_recurrent_input(tensordict)
-            self._capture_observations(tensordict, input=True)
-        except BaseException as error:
-            self._record(LifecycleEventType.FAILURE, tensordict, error)
-            raise
-        return tensordict
-
-    def _after_call(self, inputs: TensorDictBase, result: TensorDictBase) -> TensorDictBase:
-        try:
-            self.output_schema.validate_outputs(result)
-            self._validate_recurrent_output(inputs, result)
-            if self.interventions is not None:
-                result = self.interventions.apply(self, result, InterventionTiming.OUTPUT)
-        except BaseException as error:
-            self._record(LifecycleEventType.FAILURE, result, error)
-            raise
-        self._record(LifecycleEventType.AFTER, result)
-        self._capture_observations(result, input=False)
-        return result
-
-    def _validate_recurrent_input(self, tensordict: TensorDictBase) -> None:
-        recurrent = self.contract.recurrent
+    def validate_input(self, data: TensorDictBase) -> None:
+        self.spec.inputs.validate(data, self.spec.batch, boundary="interaction input")
+        recurrent = self.spec.recurrent
         if recurrent is None:
             return
-        for reset_key in recurrent.reset_keys:
-            reset = tensordict.get(reset_key)
+        for key in recurrent.reset_keys:
+            reset = data.get(key)
             if not isinstance(reset, torch.Tensor) or reset.dtype is not torch.bool:
-                raise ValueError(f"recurrent reset key {'/'.join(reset_key)} must contain a boolean tensor")
+                raise ValueError(f"recurrent reset key {'/'.join(_key_path(key))} must contain a boolean tensor")
 
-    def _validate_recurrent_output(self, inputs: TensorDictBase, outputs: TensorDictBase) -> None:
-        recurrent = self.contract.recurrent
+    def validate_output(self, inputs: TensorDictBase, outputs: TensorDictBase) -> None:
+        self.spec.outputs.validate(outputs, self.spec.batch, boundary="interaction output")
+        recurrent = self.spec.recurrent
         if recurrent is None:
             return
         for transition in recurrent.transitions:
@@ -552,274 +110,72 @@ class RuntimeInteractionContext:
                 raise ValueError("recurrent state transitions must connect tensor-valued keys")
             if previous.shape != following.shape or previous.dtype != following.dtype:
                 raise ValueError(
-                    f"recurrent state transition {'/'.join(transition.input_key)} -> "
-                    f"{'/'.join(transition.output_key)} changed shape or dtype"
+                    f"recurrent state transition {'/'.join(_key_path(transition.input_key))} -> "
+                    f"{'/'.join(_key_path(transition.output_key))} changed shape or dtype"
                 )
 
-    def _capture_observations(self, tensordict: TensorDictBase, *, input: bool) -> None:
-        if self.observations is None:
-            return
-        from xdrl.observations import HookDirection
+    def _invoke(
+        self,
+        data: TensorDictBase,
+        operation: Callable[[TensorDictBase], TensorDictBase],
+    ) -> TensorDictBase:
+        self.validate_input(data)
+        with self._execution_scope():
+            result = operation(data)
+        if not isinstance(result, TensorDictBase):
+            raise TypeError(f"interaction module must return a TensorDict, got {type(result).__name__}")
+        self.validate_output(data, result)
+        return result
 
-        schema = self.input_schema if input else self.output_schema
-        roles = {_key_path(entry.key): entry.role for entry in schema.keys}
-        self.observations.capture_tensordict(
-            self.contract,
-            tensordict,
-            direction=HookDirection.INPUT if input else HookDirection.OUTPUT,
-            roles=roles,
-        )
-
-    def _record(
-        self, kind: LifecycleEventType, tensordict: TensorDictBase, error: BaseException | None = None
-    ) -> None:
-        self.events.append(
-            LifecycleEvent(
-                order=len(self.events),
-                kind=kind,
-                interaction_id=self.contract.identity,
-                phase=self.contract.phase,
-                module_path=self.contract.module_path,
-                key_shapes=_key_shapes(tensordict),
-                error=f"{type(error).__name__}: {error}" if error is not None else None,
-            )
-        )
+    @contextmanager
+    def _execution_scope(self) -> Iterator[None]:
+        with ExitStack() as stack:
+            if self.spec.training is not None:
+                states = tuple((module, module.training) for module in self.module.modules())
+                self.module.train(self.spec.training)
+                stack.callback(_restore_training_states, states)
+            if self.spec.exploration_mode is not None:
+                stack.enter_context(set_exploration_type(self.spec.exploration_mode))
+            stack.enter_context(torch.inference_mode(self.spec.inference_mode))
+            if not self.spec.inference_mode:
+                stack.enter_context(torch.set_grad_enabled(self.spec.gradient_enabled))
+            if self.spec.autocast_device_type is not None:
+                stack.enter_context(
+                    torch.autocast(
+                        device_type=self.spec.autocast_device_type,
+                        enabled=self.spec.autocast_enabled,
+                    )
+                )
+            yield
 
 
-def _key_path(key: TensorDictKey) -> tuple[str, ...]:
-    return tuple(str(part) for part in key) if isinstance(key, tuple) else (str(key),)
-
-
-def _validate_recurrent_contract(contract: InteractionContract) -> None:
-    recurrent = contract.recurrent
+def _validate_recurrent_spec(spec: InteractionSpec) -> None:
+    recurrent = spec.recurrent
     assert recurrent is not None
-    input_entries = {_key_path(entry.key): entry for entry in contract.input_schema.keys}
-    output_entries = {_key_path(entry.key): entry for entry in contract.output_schema.keys}
     for transition in recurrent.transitions:
-        input_entry = input_entries.get(transition.input_key)
-        if input_entry is None:
-            raise ValueError(f"recurrent input state key {'/'.join(transition.input_key)} is not declared")
-        output_entry = output_entries.get(transition.output_key)
-        if output_entry is None:
-            raise ValueError(f"recurrent output state key {'/'.join(transition.output_key)} is not declared")
-        if input_entry.role is not KeyRole.STATE or input_entry.presence is not KeyPresence.REQUIRED:
-            raise ValueError(f"recurrent input state key {'/'.join(transition.input_key)} must be required state")
-        if output_entry.role is not KeyRole.STATE or output_entry.presence is not KeyPresence.PRODUCED:
-            raise ValueError(f"recurrent output state key {'/'.join(transition.output_key)} must be produced state")
+        input_entry = spec.inputs.entry(transition.input_key)
+        output_entry = spec.outputs.entry(transition.output_key)
+        if input_entry is None or input_entry.role is not KeyRole.STATE or not input_entry.required:
+            raise ValueError("recurrent input keys must be required state inputs")
+        if output_entry is None or output_entry.role is not KeyRole.STATE or not output_entry.required:
+            raise ValueError("recurrent output keys must be required state outputs")
     for reset_key in recurrent.reset_keys:
-        if reset_key not in input_entries:
-            raise ValueError(f"recurrent reset key {'/'.join(reset_key)} is not declared")
-    if recurrent.sequence_dimension != contract.time_dimension:
-        raise ValueError("recurrent sequence_dimension must match contract time_dimension")
-    if recurrent.sequence_dimension is not None and recurrent.sequence_dimension not in contract.batch_dimensions:
-        raise ValueError("recurrent sequence_dimension must name a declared batch dimension")
-
-
-def _validate_multi_agent_contract(contract: InteractionContract) -> None:
-    semantics = contract.multi_agent
-    assert semantics is not None
-    if contract.agent_dimension is None:
-        raise ValueError("multi-agent interactions require an explicit agent_dimension")
-    if semantics.target.role is not contract.role:
-        raise ValueError("semantic target role must match the interaction model role")
-    if semantics.topology is InteractionTopology.CENTRALISED_CRITIC and contract.role not in {
-        ModelRole.CRITIC,
-        ModelRole.VALUE,
-    }:
-        raise ValueError("centralised-critic interactions require a critic or value role")
-    if semantics.topology is InteractionTopology.MIXER and contract.role is not ModelRole.MIXER:
-        raise ValueError("mixer interactions require the mixer model role")
-
-
-def _validate_value_decomposition_contract(contract: InteractionContract) -> None:
-    semantics = contract.value_decomposition
-    multi_agent = contract.multi_agent
-    assert semantics is not None
-    if multi_agent is None:
-        raise ValueError("value decomposition requires multi-agent semantics")
-    if multi_agent.topology is not InteractionTopology.MIXER or contract.role is not ModelRole.MIXER:
-        raise ValueError("value decomposition requires a mixer interaction")
-    if contract.agent_dimension in contract.batch_dimensions:
-        raise ValueError("value-decomposition agent_dimension must be distinct from leading batch dimensions")
-
-    reserved_axes = set(contract.batch_dimensions)
-    reserved_axes.add(contract.agent_dimension or "")
-    reserved_axes.update(semantics.feature_axes)
-    if semantics.coalition_axis in reserved_axes:
-        raise ValueError("coalition_axis must be distinct from environment, time, agent, and feature axes")
-    if contract.agent_dimension in semantics.feature_axes or set(contract.batch_dimensions) & set(
-        semantics.feature_axes
-    ):
-        raise ValueError("feature axes must be distinct from environment, time, and agent axes")
-
-    allowed_axes = set(contract.batch_dimensions) | {
-        contract.agent_dimension or "",
-        semantics.coalition_axis,
-        *semantics.feature_axes,
-    }
-    for role, axes in asdict(semantics.axes).items():
-        if tuple(axes[: len(contract.batch_dimensions)]) != contract.batch_dimensions:
-            raise ValueError(f"{role} axes must begin with the declared batch dimensions in order")
-        unknown = set(axes) - allowed_axes
-        if unknown:
-            raise ValueError(f"{role} declares unknown axes: {', '.join(sorted(unknown))}")
-    if contract.agent_dimension not in semantics.axes.individual_value:
-        raise ValueError("individual_value axes must retain the agent dimension")
-    for role, axes in (
-        ("coalition_contribution", semantics.axes.coalition_contribution),
-        ("semantic_mask", semantics.axes.semantic_mask),
-    ):
-        if semantics.coalition_axis not in axes:
-            raise ValueError(f"{role} axes must retain the coalition axis")
-
-    declared_agents = multi_agent.declared_agents
-    declared_set = set(declared_agents)
-    for term in semantics.terms:
-        if not set(term.members) <= declared_set:
-            raise ValueError(f"coalition {term.identity!r} contains agents outside the declared group")
-        canonical = tuple(agent for agent in declared_agents if agent in term.members)
-        if term.members != canonical:
-            raise ValueError(f"coalition {term.identity!r} members must follow declared agent order")
-
-    entries = {
-        _key_path(entry.key): entry
-        for schema in (contract.input_schema, contract.output_schema)
-        for entry in schema.keys
-    }
-    role_by_name = {
-        "individual_value": KeyRole.INDIVIDUAL_VALUE,
-        "coalition_contribution": KeyRole.COALITION_CONTRIBUTION,
-        "semantic_mask": KeyRole.SEMANTIC_MASK,
-        "mixer_input": KeyRole.MIXER_INPUT,
-        "joint_value": KeyRole.JOINT_VALUE,
-    }
-    declared_paths = {_key_path(key) for key in asdict(semantics.keys).values()}
-    axes_by_path = {
-        _key_path(key): tuple(getattr(semantics.axes, name)) for name, key in asdict(semantics.keys).items()
-    }
-    for name, key in asdict(semantics.keys).items():
-        entry = entries.get(_key_path(key))
-        if entry is None:
-            raise ValueError(f"value-decomposition {name} key is not declared in the interaction schemas")
-        if entry.role is not role_by_name[name]:
-            raise ValueError(f"value-decomposition {name} key must use the {role_by_name[name].value} role")
-        tensor_axes = getattr(semantics.axes, name)
-        semantic_extents = {
-            semantics.coalition_axis: len(semantics.terms),
-            contract.agent_dimension: multi_agent.n_agents,
-        }
-        axes_with_declared_extents = set(tensor_axes) & set(semantic_extents)
-        if entry.spec is None and axes_with_declared_extents:
-            raise ValueError(f"value-decomposition {name} requires a spec to validate semantic-axis extents")
-        if entry.spec is not None and len(tensor_axes) != len(contract.batch_dimensions) + len(entry.spec.shape):
-            raise ValueError(f"value-decomposition {name} axes do not match its declared tensor rank")
-        if entry.spec is not None:
-            for axis in axes_with_declared_extents:
-                feature_index = tensor_axes.index(axis) - len(contract.batch_dimensions)
-                if entry.spec.shape[feature_index] != semantic_extents[axis]:
-                    raise ValueError(f"value-decomposition {name} {axis} extent must be {semantic_extents[axis]}")
-
-    coalition_path = _key_path(semantics.keys.coalition_contribution)
-    joint_path = _key_path(semantics.keys.joint_value)
-    if not any(
-        _key_path(reduction.source_key) == coalition_path
-        and _key_path(reduction.target_key) == joint_path
-        and semantics.coalition_axis in reduction.reduced_axes
-        for reduction in semantics.reductions
-    ):
-        raise ValueError("joint_value requires a named reduction from coalition_contribution over the coalition axis")
-    for reduction in semantics.reductions:
-        if (
-            _key_path(reduction.source_key) not in declared_paths
-            or _key_path(reduction.target_key) not in declared_paths
-        ):
-            raise ValueError("named reductions must reference declared value-decomposition keys")
-        if not set(reduction.reduced_axes) <= allowed_axes:
-            raise ValueError("named reduction references unknown axes")
-        source_axes = axes_by_path[_key_path(reduction.source_key)]
-        target_axes = axes_by_path[_key_path(reduction.target_key)]
-        if not set(reduction.reduced_axes) <= set(source_axes):
-            raise ValueError("named reduction axes must exist on its source tensor")
-        remaining_axes = tuple(axis for axis in source_axes if axis not in reduction.reduced_axes)
-        if remaining_axes != target_axes:
-            raise ValueError("named reduction target axes must equal its unreduced source axes")
-
-
-def _validate_internal_computation_contract(contract: InteractionContract) -> None:
-    semantics = contract.internal_computation
-    assert semantics is not None
-    if contract.recurrent is None:
-        raise ValueError("internal computation requires recurrent semantics")
-    reserved = {name for name in (contract.time_dimension, contract.recurrent.sequence_dimension) if name is not None}
-    overlap = reserved.intersection(axis.name for axis in semantics.axes)
-    if overlap:
-        raise ValueError(
-            "internal-computation axes must be distinct from environment/sequence time dimensions: "
-            + ", ".join(sorted(overlap))
-        )
-    transition_keys = {
-        key for transition in contract.recurrent.transitions for key in (transition.input_key, transition.output_key)
-    }
-    unknown = set(semantics.recurrent_state_keys) - transition_keys
-    if unknown:
-        raise ValueError("internal computation references keys outside the recurrent state transitions")
-
-
-def _single_tensor_output(output: object, path: str) -> torch.Tensor:
-    if isinstance(output, torch.Tensor):
-        return output
-    if isinstance(output, Sequence) and len(output) == 1 and isinstance(output[0], torch.Tensor):
-        return output[0]
-    raise OccurrenceIdentityError(
-        f"internal occurrence target {path!r} must return one tensor for unambiguous observation"
-    )
+        if spec.inputs.entry(reset_key) is None:
+            raise ValueError(f"recurrent reset key {'/'.join(_key_path(reset_key))} is not an input")
 
 
 def _restore_training_states(states: tuple[tuple[torch.nn.Module, bool], ...]) -> None:
-    """Restore the exact training flag of every submodule in a module tree."""
     for module, training in states:
         module.training = training
 
 
-def _set_training_mode(stack: ExitStack, module: object, training: bool) -> None:
-    """Apply a temporary mode to the module tree actually used for execution."""
-    if not isinstance(module, torch.nn.Module):
-        raise TypeError("module_training requires the invoked module to be a torch.nn.Module")
-    training_states = tuple((child, child.training) for child in module.modules())
-    stack.callback(_restore_training_states, training_states)
-    module.train(training)
+def _key_path(key: TensorDictKey) -> tuple[str, ...]:
+    return (key,) if isinstance(key, str) else tuple(key)
 
 
-def _key_shapes(tensordict: TensorDictBase) -> dict[str, tuple[int, ...] | None]:
-    """Capture only key paths and shapes, never references to tensor values."""
-    result: dict[str, tuple[int, ...] | None] = {}
-    for key, value in tensordict.items(include_nested=True, leaves_only=True):
-        path = "/".join(_key_path(key))
-        result[path] = tuple(value.shape) if isinstance(value, torch.Tensor) else None
-    return result
-
-
-def _spec_constraints(spec: Any) -> dict[str, Any]:
-    """Project TensorSpec validation constraints into JSON-compatible values."""
-    constraints: dict[str, Any] = {}
-    for name in ("dtype", "device", "domain", "low", "high", "n", "nvec", "mask"):
-        if hasattr(spec, name):
-            constraints[name] = _json_value(getattr(spec, name))
-    return constraints
-
-
-def _json_value(value: Any) -> Any:
-    """Convert scalar spec metadata and tensors without retaining tensors."""
-    if isinstance(value, torch.Tensor):
-        return value.detach().cpu().tolist()
-    if isinstance(value, (torch.dtype, torch.device)):
-        return str(value)
-    if isinstance(value, torch.Size):
-        return tuple(value)
-    if isinstance(value, tuple):
-        return tuple(_json_value(item) for item in value)
-    if isinstance(value, list):
-        return [_json_value(item) for item in value]
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    return value
+__all__ = [
+    "Interaction",
+    "InteractionSpec",
+    "RecurrentSemantics",
+    "RecurrentStateTransition",
+]

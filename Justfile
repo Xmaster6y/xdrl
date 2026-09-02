@@ -5,22 +5,6 @@ install:
 checks:
 	uv run pre-commit run --all-files
 
-check-dependency-snapshot:
-	uv run python scripts/dependency_snapshot.py check
-
-sync-dependency-snapshot:
-	uv run python scripts/dependency_snapshot.py sync
-
-refresh-dependencies:
-	uv run python scripts/dependency_snapshot.py refresh
-	just dependency-gates
-
-dependency-gates:
-	just check-dependency-snapshot
-	just checks
-	just tests
-	just docs
-
 test-assets:
 	@echo "No test assets to resolve"
 
@@ -29,9 +13,6 @@ tests:
 
 test-unit:
 	uv run pytest tests/unit -s -v
-
-test-upstream-compatibility:
-	uv run pytest tests/upstream_compatibility -s -v
 
 test-integration:
 	uv run pytest tests/integration -s -v

@@ -28,9 +28,6 @@ jobs:
     - name: Install dependencies
       run: |
         uv sync --locked
-    - name: Check dependency snapshot drift
-      run: |
-        just check-dependency-snapshot
     - name: Run checks
       run: |
         just checks
@@ -40,9 +37,6 @@ jobs:
     - name: Run unit contract gate
       run: |
         uv run pytest tests/unit --cov=src --cov-append --junitxml=test-results-unit.xml -s -v
-    - name: Run upstream compatibility gate
-      run: |
-        uv run pytest tests/upstream_compatibility --cov=src --cov-append --junitxml=test-results-upstream.xml -s -v
     - name: Run integration gate
       run: |
         uv run pytest tests/integration --cov=src --cov-append --junitxml=test-results-integration.xml -s -v

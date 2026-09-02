@@ -1827,7 +1827,7 @@ wheels = [
 [[package]]
 name = "tdhook"
 version = "0.2.0"
-source = { git = "https://github.com/Xmaster6y/tdhook?branch=main#ea51fe37094d19ddbdacb5db685583a5d1b88b3a" }
+source = { git = "https://github.com/Xmaster6y/tdhook?branch=main#bb85c69b0d678205d5e534dfe6253fdf0a820eff" }
 dependencies = [
     { name = "tensordict" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'" },
@@ -2071,7 +2071,6 @@ name = "xdrl"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "packaging" },
     { name = "tdhook" },
     { name = "tensordict" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'" },
@@ -2102,7 +2101,6 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "packaging", specifier = ">=21.0" },
     { name = "tdhook", git = "https://github.com/Xmaster6y/tdhook?branch=main" },
     { name = "tensordict", git = "https://github.com/pytorch/tensordict" },
     { name = "torch", marker = "python_full_version == '3.12.*' or sys_platform != 'darwin'", specifier = ">=2.11", index = "https://pypi.org/simple" },
