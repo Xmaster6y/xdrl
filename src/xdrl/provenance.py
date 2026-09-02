@@ -15,6 +15,7 @@ from tdhook.workflow import CompatibilityDecision, PlannedExecution, WorkflowPla
 from xdrl.compatibility import installed_dependency_versions
 from xdrl.interactions import (
     AgentSelector,
+    CoalitionTerm,
     InteractionTopology,
     InteractionContract,
     InteractionPhase,
@@ -24,14 +25,18 @@ from xdrl.interactions import (
     LifecycleEvent,
     LifecycleEventType,
     MultiAgentSemantics,
+    NamedReduction,
     RecurrentCollectorMode,
     RecurrentSemantics,
     RecurrentStateTransition,
     SemanticTarget,
+    ValueDecompositionAxes,
+    ValueDecompositionKeys,
+    ValueDecompositionSemantics,
 )
 from xdrl.types import BatchSemantics, KeyPresence, KeyRole, KeySchema, ModelRole, TensorDictSchema
 
-WORKFLOW_PROVENANCE_SCHEMA_REVISION = 4
+WORKFLOW_PROVENANCE_SCHEMA_REVISION = 5
 
 
 class ProvenanceSchemaError(ValueError):
@@ -431,6 +436,11 @@ class WorkflowProvenance:
                     "workflow provenance schema revision 3 predates internal-computation semantics; "
                     "decode it with an XDRL version that supports revision 3"
                 )
+            if revision == 4:
+                raise ProvenanceSchemaError(
+                    "workflow provenance schema revision 4 predates value-decomposition semantics; "
+                    "decode it with an XDRL version that supports revision 4"
+                )
             raise ProvenanceSchemaError(
                 f"unsupported workflow provenance schema revision {revision!r}; "
                 f"expected {WORKFLOW_PROVENANCE_SCHEMA_REVISION}"
@@ -507,6 +517,7 @@ _CONTRACT_FIELDS = {
     "module_training",
     "recurrent",
     "multi_agent",
+    "value_decomposition",
     "internal_computation",
 }
 
@@ -541,6 +552,9 @@ def _contract_projection(value: Any) -> dict[str, Any]:
         contract[name] = _optional_identifier(entry[name], f"{field}.{name}")
     contract["recurrent"] = _recurrent_projection(entry["recurrent"], f"{field}.recurrent")
     contract["multi_agent"] = _multi_agent_projection(entry["multi_agent"], f"{field}.multi_agent")
+    contract["value_decomposition"] = _value_decomposition_projection(
+        entry["value_decomposition"], f"{field}.value_decomposition"
+    )
     contract["internal_computation"] = _internal_computation_projection(
         entry["internal_computation"], f"{field}.internal_computation"
     )
@@ -598,6 +612,34 @@ def _validate_canonical_contract(contract: Mapping[str, Any]) -> None:
                 ModelRole(target["role"]),
                 AgentSelector(selector["group"], tuple(selector["agents"])),
             ),
+            agent_identities=tuple(multi_agent_value["agent_identities"]),
+        )
+
+    value_decomposition_value = contract["value_decomposition"]
+    value_decomposition = None
+    if value_decomposition_value is not None:
+        keys = value_decomposition_value["keys"]
+        axes = value_decomposition_value["axes"]
+        value_decomposition = ValueDecompositionSemantics(
+            coalition_axis=value_decomposition_value["coalition_axis"],
+            feature_axes=tuple(value_decomposition_value["feature_axes"]),
+            terms=tuple(
+                CoalitionTerm(item["identity"], tuple(item["members"]), item["axis_index"])
+                for item in value_decomposition_value["terms"]
+            ),
+            keys=ValueDecompositionKeys(**{name: tuple(value) for name, value in keys.items()}),
+            axes=ValueDecompositionAxes(**{name: tuple(value) for name, value in axes.items()}),
+            reductions=tuple(
+                NamedReduction(
+                    item["name"],
+                    tuple(item["source_key"]),
+                    tuple(item["target_key"]),
+                    tuple(item["reduced_axes"]),
+                )
+                for item in value_decomposition_value["reductions"]
+            ),
+            parameters_shared=value_decomposition_value["parameters_shared"],
+            coalition_targets=tuple(value_decomposition_value["coalition_targets"]),
         )
 
     internal_value = contract["internal_computation"]
@@ -639,6 +681,7 @@ def _validate_canonical_contract(contract: Mapping[str, Any]) -> None:
             module_training=contract["module_training"],
             recurrent=recurrent,
             multi_agent=multi_agent,
+            value_decomposition=value_decomposition,
             internal_computation=internal_computation,
         )
     except (TypeError, ValueError, NotImplementedError) as error:
@@ -715,7 +758,7 @@ def _recurrent_projection(value: Any, field: str) -> dict[str, Any] | None:
 def _multi_agent_projection(value: Any, field: str) -> dict[str, Any] | None:
     if value is None:
         return None
-    entry = _exact_mapping(value, field, {"topology", "group", "n_agents", "target"})
+    entry = _exact_mapping(value, field, {"topology", "group", "n_agents", "target", "agent_identities"})
     target = _exact_mapping(entry["target"], f"{field}.target", {"role", "selector"})
     selector = _exact_mapping(target["selector"], f"{field}.target.selector", {"group", "agents"})
     agents_value = selector["agents"]
@@ -723,10 +766,16 @@ def _multi_agent_projection(value: Any, field: str) -> dict[str, Any] | None:
         type(agent) not in (str, int) or (isinstance(agent, str) and not agent) for agent in agents_value
     ):
         raise ProvenanceSchemaError(f"{field}.target.selector.agents must be an array of identifiers")
+    identities_value = entry["agent_identities"]
+    if not isinstance(identities_value, list) or any(
+        type(agent) not in (str, int) or (isinstance(agent, str) and not agent) for agent in identities_value
+    ):
+        raise ProvenanceSchemaError(f"{field}.agent_identities must be an array of identifiers")
     return {
         "topology": _enum_string(entry["topology"], InteractionTopology, f"{field}.topology"),
         "group": _nonempty_string(entry["group"], f"{field}.group"),
         "n_agents": _integer(entry["n_agents"], f"{field}.n_agents", minimum=1),
+        "agent_identities": list(identities_value),
         "target": {
             "role": _enum_string(target["role"], ModelRole, f"{field}.target.role"),
             "selector": {
@@ -734,6 +783,83 @@ def _multi_agent_projection(value: Any, field: str) -> dict[str, Any] | None:
                 "agents": list(agents_value),
             },
         },
+    }
+
+
+_VALUE_DECOMPOSITION_ROLES = {
+    "individual_value",
+    "coalition_contribution",
+    "semantic_mask",
+    "mixer_input",
+    "joint_value",
+}
+
+
+def _value_decomposition_projection(value: Any, field: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    entry = _exact_mapping(
+        value,
+        field,
+        {
+            "coalition_axis",
+            "feature_axes",
+            "terms",
+            "keys",
+            "axes",
+            "reductions",
+            "parameters_shared",
+            "coalition_targets",
+        },
+    )
+    terms_value = entry["terms"]
+    reductions_value = entry["reductions"]
+    if not isinstance(terms_value, list) or not isinstance(reductions_value, list):
+        raise ProvenanceSchemaError(f"{field}.terms and {field}.reductions must be arrays")
+    terms = []
+    for index, value in enumerate(terms_value):
+        term_field = f"{field}.terms[{index}]"
+        term = _exact_mapping(value, term_field, {"identity", "members", "axis_index"})
+        members = term["members"]
+        if not isinstance(members, list):
+            raise ProvenanceSchemaError(f"{term_field}.members must be an array")
+        terms.append(
+            {
+                "identity": _nonempty_string(term["identity"], f"{term_field}.identity"),
+                "members": [
+                    _internal_coordinate(member, f"{term_field}.members[{member_index}]")
+                    for member_index, member in enumerate(members)
+                ],
+                "axis_index": _integer(term["axis_index"], f"{term_field}.axis_index", minimum=0),
+            }
+        )
+    keys = _exact_mapping(entry["keys"], f"{field}.keys", _VALUE_DECOMPOSITION_ROLES)
+    axes = _exact_mapping(entry["axes"], f"{field}.axes", _VALUE_DECOMPOSITION_ROLES)
+    reductions = []
+    for index, value in enumerate(reductions_value):
+        reduction_field = f"{field}.reductions[{index}]"
+        reduction = _exact_mapping(
+            value,
+            reduction_field,
+            {"name", "source_key", "target_key", "reduced_axes"},
+        )
+        reductions.append(
+            {
+                "name": _nonempty_string(reduction["name"], f"{reduction_field}.name"),
+                "source_key": list(_key_path_value(reduction["source_key"], f"{reduction_field}.source_key")),
+                "target_key": list(_key_path_value(reduction["target_key"], f"{reduction_field}.target_key")),
+                "reduced_axes": list(_strings(reduction["reduced_axes"], f"{reduction_field}.reduced_axes")),
+            }
+        )
+    return {
+        "coalition_axis": _nonempty_string(entry["coalition_axis"], f"{field}.coalition_axis"),
+        "feature_axes": list(_strings(entry["feature_axes"], f"{field}.feature_axes")),
+        "terms": terms,
+        "keys": {name: list(_key_path_value(keys[name], f"{field}.keys.{name}")) for name in keys},
+        "axes": {name: list(_strings(axes[name], f"{field}.axes.{name}")) for name in axes},
+        "reductions": reductions,
+        "parameters_shared": _boolean(entry["parameters_shared"], f"{field}.parameters_shared"),
+        "coalition_targets": list(_strings(entry["coalition_targets"], f"{field}.coalition_targets")),
     }
 
 

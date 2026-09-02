@@ -261,6 +261,137 @@ class AgentSelector:
             raise ValueError("agent selector contains duplicate agents")
 
 
+AgentIdentity = str | int
+
+
+@dataclass(frozen=True, slots=True)
+class CoalitionTerm:
+    """One semantic coalition coordinate, independent of module structure."""
+
+    identity: str
+    members: tuple[AgentIdentity, ...]
+    axis_index: int
+
+    def __post_init__(self) -> None:
+        if not self.identity:
+            raise ValueError("coalition identity must be non-empty")
+        if not self.members:
+            raise ValueError("coalition membership must be non-empty")
+        if any(type(member) not in {str, int} or member == "" for member in self.members):
+            raise TypeError("coalition members must be non-empty strings or integers")
+        if len(set(self.members)) != len(self.members):
+            raise ValueError("coalition membership contains duplicate agents")
+        if type(self.axis_index) is not int or self.axis_index < 0:
+            raise ValueError("coalition axis_index must be a non-negative integer")
+
+
+@dataclass(frozen=True, slots=True)
+class ValueDecompositionKeys:
+    """Nested TensorDict keys used by a value-decomposition interaction."""
+
+    individual_value: TensorDictKey
+    coalition_contribution: TensorDictKey
+    semantic_mask: TensorDictKey
+    mixer_input: TensorDictKey
+    joint_value: TensorDictKey
+
+    def __post_init__(self) -> None:
+        paths = tuple(_key_path(key) for key in asdict(self).values())
+        if any(not path or any(not part for part in path) for path in paths):
+            raise ValueError("value-decomposition keys must be non-empty")
+        if len(set(paths)) != len(paths):
+            raise ValueError("value-decomposition keys must be unique")
+
+
+@dataclass(frozen=True, slots=True)
+class ValueDecompositionAxes:
+    """Semantic axes for each value-decomposition tensor."""
+
+    individual_value: tuple[str, ...]
+    coalition_contribution: tuple[str, ...]
+    semantic_mask: tuple[str, ...]
+    mixer_input: tuple[str, ...]
+    joint_value: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        for role, axes in asdict(self).items():
+            if not axes:
+                raise ValueError(f"{role} axes must be explicit")
+            if any(not axis for axis in axes):
+                raise ValueError(f"{role} axes must be non-empty")
+            if len(set(axes)) != len(axes):
+                raise ValueError(f"{role} axes contain duplicates")
+
+
+@dataclass(frozen=True, slots=True)
+class NamedReduction:
+    """A provenance-bearing aggregation between declared TensorDict keys."""
+
+    name: str
+    source_key: TensorDictKey
+    target_key: TensorDictKey
+    reduced_axes: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("reduction name must be non-empty")
+        if not self.reduced_axes or any(not axis for axis in self.reduced_axes):
+            raise ValueError("reduced_axes must be explicit and non-empty")
+        if len(set(self.reduced_axes)) != len(self.reduced_axes):
+            raise ValueError("reduced_axes contains duplicates")
+        if _key_path(self.source_key) == _key_path(self.target_key):
+            raise ValueError("reduction source and target keys must differ")
+
+
+@dataclass(frozen=True, slots=True)
+class ValueDecompositionSemantics:
+    """Coalition identities, tensor axes, keys, and explicit aggregations."""
+
+    coalition_axis: str
+    feature_axes: tuple[str, ...]
+    terms: tuple[CoalitionTerm, ...]
+    keys: ValueDecompositionKeys
+    axes: ValueDecompositionAxes
+    reductions: tuple[NamedReduction, ...]
+    parameters_shared: bool = False
+    coalition_targets: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.coalition_axis:
+            raise ValueError("coalition_axis must be non-empty")
+        if any(not axis for axis in self.feature_axes) or len(set(self.feature_axes)) != len(self.feature_axes):
+            raise ValueError("feature axes must be non-empty and unique")
+        if not self.terms:
+            raise ValueError("value decomposition requires coalition terms")
+        identities = {term.identity for term in self.terms}
+        if len(identities) != len(self.terms):
+            raise ValueError("coalition identities must be unique")
+        memberships = tuple(term.members for term in self.terms)
+        if len(set(memberships)) != len(memberships):
+            raise ValueError("coalition memberships must be unique")
+        if tuple(term.axis_index for term in self.terms) != tuple(range(len(self.terms))):
+            raise ValueError("coalition axis indices must be contiguous and order-stable from zero")
+        if not self.reductions:
+            raise ValueError("value decomposition requires at least one named reduction")
+        if len({reduction.name for reduction in self.reductions}) != len(self.reductions):
+            raise ValueError("reduction names must be unique")
+        if type(self.parameters_shared) is not bool:
+            raise TypeError("parameters_shared must be a boolean")
+        if len(set(self.coalition_targets)) != len(self.coalition_targets):
+            raise ValueError("coalition targets must be unique")
+        unknown_targets = set(self.coalition_targets) - identities
+        if unknown_targets:
+            raise ValueError(f"unknown coalition targets: {', '.join(sorted(unknown_targets))}")
+
+    @property
+    def targeted_terms(self) -> tuple[CoalitionTerm, ...]:
+        """Return selected semantic terms in canonical coalition-axis order."""
+        if not self.coalition_targets:
+            return self.terms
+        selected = set(self.coalition_targets)
+        return tuple(term for term in self.terms if term.identity in selected)
+
+
 @dataclass(frozen=True, slots=True)
 class SemanticTarget:
     """Target a model role and agent group without treating paths as identities."""
@@ -277,6 +408,7 @@ class MultiAgentSemantics:
     group: str
     n_agents: int
     target: SemanticTarget
+    agent_identities: tuple[AgentIdentity, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.group:
@@ -285,9 +417,27 @@ class MultiAgentSemantics:
             raise ValueError("n_agents must be positive")
         if self.target.selector.group != self.group:
             raise ValueError("semantic target group must match the multi-agent group")
-        for agent in self.target.selector.agents:
-            if isinstance(agent, int) and not 0 <= agent < self.n_agents:
-                raise ValueError(f"agent index {agent} is outside the declared group size {self.n_agents}")
+        if self.agent_identities:
+            if len(self.agent_identities) != self.n_agents:
+                raise ValueError("agent_identities must match the declared group size")
+            if len(set(self.agent_identities)) != len(self.agent_identities):
+                raise ValueError("agent_identities must be unique")
+            if any(type(agent) not in {str, int} or agent == "" for agent in self.agent_identities):
+                raise TypeError("agent identities must be non-empty strings or integers")
+        if self.agent_identities:
+            declared = set(self.agent_identities)
+            for agent in self.target.selector.agents:
+                if agent not in declared:
+                    raise ValueError(f"agent identity {agent!r} is outside the declared agent group")
+        else:
+            for agent in self.target.selector.agents:
+                if isinstance(agent, int) and not 0 <= agent < self.n_agents:
+                    raise ValueError(f"agent index {agent} is outside the declared group size {self.n_agents}")
+
+    @property
+    def declared_agents(self) -> tuple[AgentIdentity, ...]:
+        """Return the canonical ordered semantic identities for the group."""
+        return self.agent_identities or tuple(range(self.n_agents))
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,6 +508,7 @@ class InteractionContract:
     module_training: bool | None = None
     recurrent: RecurrentSemantics | None = None
     multi_agent: MultiAgentSemantics | None = None
+    value_decomposition: ValueDecompositionSemantics | None = None
     internal_computation: InternalComputationSemantics | None = None
 
     def __post_init__(self) -> None:
@@ -375,6 +526,8 @@ class InteractionContract:
             _validate_recurrent_contract(self)
         if self.multi_agent is not None:
             _validate_multi_agent_contract(self)
+        if self.value_decomposition is not None:
+            _validate_value_decomposition_contract(self)
         if self.internal_computation is not None:
             _validate_internal_computation_contract(self)
 
@@ -405,6 +558,9 @@ class InteractionContract:
             "module_training": self.module_training,
             "recurrent": asdict(self.recurrent) if self.recurrent is not None else None,
             "multi_agent": asdict(self.multi_agent) if self.multi_agent is not None else None,
+            "value_decomposition": (
+                asdict(self.value_decomposition) if self.value_decomposition is not None else None
+            ),
             "internal_computation": (
                 asdict(self.internal_computation) if self.internal_computation is not None else None
             ),
@@ -838,6 +994,102 @@ def _validate_multi_agent_contract(contract: InteractionContract) -> None:
         raise ValueError("centralised-critic interactions require a critic or value role")
     if semantics.topology is InteractionTopology.MIXER and contract.role is not ModelRole.MIXER:
         raise ValueError("mixer interactions require the mixer model role")
+
+
+def _validate_value_decomposition_contract(contract: InteractionContract) -> None:
+    semantics = contract.value_decomposition
+    multi_agent = contract.multi_agent
+    assert semantics is not None
+    if multi_agent is None:
+        raise ValueError("value decomposition requires multi-agent semantics")
+    if multi_agent.topology is not InteractionTopology.MIXER or contract.role is not ModelRole.MIXER:
+        raise ValueError("value decomposition requires a mixer interaction")
+
+    reserved_axes = set(contract.batch_dimensions)
+    reserved_axes.add(contract.agent_dimension or "")
+    reserved_axes.update(semantics.feature_axes)
+    if semantics.coalition_axis in reserved_axes:
+        raise ValueError("coalition_axis must be distinct from environment, time, agent, and feature axes")
+    if contract.agent_dimension in semantics.feature_axes or set(contract.batch_dimensions) & set(
+        semantics.feature_axes
+    ):
+        raise ValueError("feature axes must be distinct from environment, time, and agent axes")
+
+    allowed_axes = set(contract.batch_dimensions) | {
+        contract.agent_dimension or "",
+        semantics.coalition_axis,
+        *semantics.feature_axes,
+    }
+    for role, axes in asdict(semantics.axes).items():
+        unknown = set(axes) - allowed_axes
+        if unknown:
+            raise ValueError(f"{role} declares unknown axes: {', '.join(sorted(unknown))}")
+    if contract.agent_dimension not in semantics.axes.individual_value:
+        raise ValueError("individual_value axes must retain the agent dimension")
+    for role, axes in (
+        ("coalition_contribution", semantics.axes.coalition_contribution),
+        ("semantic_mask", semantics.axes.semantic_mask),
+    ):
+        if semantics.coalition_axis not in axes:
+            raise ValueError(f"{role} axes must retain the coalition axis")
+
+    declared_agents = multi_agent.declared_agents
+    declared_set = set(declared_agents)
+    for term in semantics.terms:
+        if not set(term.members) <= declared_set:
+            raise ValueError(f"coalition {term.identity!r} contains agents outside the declared group")
+        canonical = tuple(agent for agent in declared_agents if agent in term.members)
+        if term.members != canonical:
+            raise ValueError(f"coalition {term.identity!r} members must follow declared agent order")
+
+    entries = {
+        _key_path(entry.key): entry
+        for schema in (contract.input_schema, contract.output_schema)
+        for entry in schema.keys
+    }
+    role_by_name = {
+        "individual_value": KeyRole.INDIVIDUAL_VALUE,
+        "coalition_contribution": KeyRole.COALITION_CONTRIBUTION,
+        "semantic_mask": KeyRole.SEMANTIC_MASK,
+        "mixer_input": KeyRole.MIXER_INPUT,
+        "joint_value": KeyRole.JOINT_VALUE,
+    }
+    declared_paths = {_key_path(key) for key in asdict(semantics.keys).values()}
+    axes_by_path = {
+        _key_path(key): tuple(getattr(semantics.axes, name)) for name, key in asdict(semantics.keys).items()
+    }
+    for name, key in asdict(semantics.keys).items():
+        entry = entries.get(_key_path(key))
+        if entry is None:
+            raise ValueError(f"value-decomposition {name} key is not declared in the interaction schemas")
+        if entry.role is not role_by_name[name]:
+            raise ValueError(f"value-decomposition {name} key must use the {role_by_name[name].value} role")
+        if entry.spec is not None and len(getattr(semantics.axes, name)) != len(contract.batch_dimensions) + len(
+            entry.spec.shape
+        ):
+            raise ValueError(f"value-decomposition {name} axes do not match its declared tensor rank")
+
+    joint_path = _key_path(semantics.keys.joint_value)
+    if not any(
+        _key_path(reduction.target_key) == joint_path and semantics.coalition_axis in reduction.reduced_axes
+        for reduction in semantics.reductions
+    ):
+        raise ValueError("joint_value requires a named reduction over the coalition axis")
+    for reduction in semantics.reductions:
+        if (
+            _key_path(reduction.source_key) not in declared_paths
+            or _key_path(reduction.target_key) not in declared_paths
+        ):
+            raise ValueError("named reductions must reference declared value-decomposition keys")
+        if not set(reduction.reduced_axes) <= allowed_axes:
+            raise ValueError("named reduction references unknown axes")
+        source_axes = axes_by_path[_key_path(reduction.source_key)]
+        target_axes = axes_by_path[_key_path(reduction.target_key)]
+        if not set(reduction.reduced_axes) <= set(source_axes):
+            raise ValueError("named reduction axes must exist on its source tensor")
+        remaining_axes = tuple(axis for axis in source_axes if axis not in reduction.reduced_axes)
+        if remaining_axes != target_axes:
+            raise ValueError("named reduction target axes must equal its unreduced source axes")
 
 
 def _validate_internal_computation_contract(contract: InteractionContract) -> None:

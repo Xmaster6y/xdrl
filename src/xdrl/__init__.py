@@ -20,6 +20,7 @@ from xdrl.compatibility import (
 )
 from xdrl.interactions import (
     AgentSelector,
+    CoalitionTerm,
     InteractionContract,
     InteractionPhase,
     InteractionTopology,
@@ -30,12 +31,16 @@ from xdrl.interactions import (
     LifecycleEvent,
     LifecycleEventType,
     MultiAgentSemantics,
+    NamedReduction,
     OccurrenceIdentityError,
     RecurrentCollectorMode,
     RecurrentSemantics,
     RecurrentStateTransition,
     RuntimeInteractionContext,
     SemanticTarget,
+    ValueDecompositionAxes,
+    ValueDecompositionKeys,
+    ValueDecompositionSemantics,
 )
 from xdrl.interventions import (
     Intervention,
@@ -104,6 +109,7 @@ except PackageNotFoundError:
 
 __all__ = [
     "AgentSelector",
+    "CoalitionTerm",
     "ArtifactDigestAlgorithm",
     "BatchSemantics",
     "CompatibilityBoundaryError",
@@ -133,6 +139,7 @@ __all__ = [
     "LifecycleEvent",
     "LifecycleEventType",
     "MultiAgentSemantics",
+    "NamedReduction",
     "OccurrenceIdentityError",
     "ModelRole",
     "ObservationKind",
@@ -157,6 +164,9 @@ __all__ = [
     "RuntimeInteractionContext",
     "SchemaValidationError",
     "SemanticTarget",
+    "ValueDecompositionAxes",
+    "ValueDecompositionKeys",
+    "ValueDecompositionSemantics",
     "SUPPORTED_DEPENDENCIES",
     "SUPPORTED_GIT_REVISIONS",
     "SUPPORTED_PYTHON",

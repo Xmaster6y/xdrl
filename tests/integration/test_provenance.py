@@ -181,8 +181,8 @@ def test_workflow_provenance_rejects_unknown_revisions_and_fields() -> None:
         WorkflowProvenance.from_dict(payload)
 
     payload = _run().to_dict()
-    payload["schema_revision"] = 3
-    with pytest.raises(ProvenanceSchemaError, match="revision 3 predates internal-computation"):
+    payload["schema_revision"] = 4
+    with pytest.raises(ProvenanceSchemaError, match="revision 4 predates value-decomposition"):
         WorkflowProvenance.from_dict(payload)
 
     payload = _run().to_dict()
@@ -278,6 +278,7 @@ def test_workflow_provenance_decodes_recurrent_and_multi_agent_contract_evidence
         "group": "agents",
         "n_agents": 2,
         "target": {"role": "actor", "selector": {"group": "agents", "agents": [0, "blue"]}},
+        "agent_identities": [],
     }
     restored = WorkflowProvenance.from_dict(payload)
     round_tripped = WorkflowProvenance.from_json(restored.to_json())
@@ -340,6 +341,7 @@ def test_workflow_provenance_strictly_decodes_internal_computation(
                             "role": "actor",
                             "selector": {"group": "other", "agents": []},
                         },
+                        "agent_identities": [],
                     }
                 }
             ),
