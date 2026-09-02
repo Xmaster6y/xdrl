@@ -273,6 +273,8 @@ class CoalitionTerm:
     axis_index: int
 
     def __post_init__(self) -> None:
+        if type(self.identity) is not str:
+            raise TypeError("coalition identity must be a string")
         if not self.identity:
             raise ValueError("coalition identity must be non-empty")
         if not self.members:
@@ -431,7 +433,7 @@ class MultiAgentSemantics:
                     raise ValueError(f"agent identity {agent!r} is outside the declared agent group")
         else:
             for agent in self.target.selector.agents:
-                if isinstance(agent, int) and not 0 <= agent < self.n_agents:
+                if type(agent) is not int or not 0 <= agent < self.n_agents:
                     raise ValueError(f"agent index {agent} is outside the declared group size {self.n_agents}")
 
     @property
@@ -1004,6 +1006,8 @@ def _validate_value_decomposition_contract(contract: InteractionContract) -> Non
         raise ValueError("value decomposition requires multi-agent semantics")
     if multi_agent.topology is not InteractionTopology.MIXER or contract.role is not ModelRole.MIXER:
         raise ValueError("value decomposition requires a mixer interaction")
+    if contract.agent_dimension in contract.batch_dimensions:
+        raise ValueError("value-decomposition agent_dimension must be distinct from leading batch dimensions")
 
     reserved_axes = set(contract.batch_dimensions)
     reserved_axes.add(contract.agent_dimension or "")
@@ -1021,6 +1025,8 @@ def _validate_value_decomposition_contract(contract: InteractionContract) -> Non
         *semantics.feature_axes,
     }
     for role, axes in asdict(semantics.axes).items():
+        if tuple(axes[: len(contract.batch_dimensions)]) != contract.batch_dimensions:
+            raise ValueError(f"{role} axes must begin with the declared batch dimensions in order")
         unknown = set(axes) - allowed_axes
         if unknown:
             raise ValueError(f"{role} declares unknown axes: {', '.join(sorted(unknown))}")
@@ -1064,17 +1070,31 @@ def _validate_value_decomposition_contract(contract: InteractionContract) -> Non
             raise ValueError(f"value-decomposition {name} key is not declared in the interaction schemas")
         if entry.role is not role_by_name[name]:
             raise ValueError(f"value-decomposition {name} key must use the {role_by_name[name].value} role")
-        if entry.spec is not None and len(getattr(semantics.axes, name)) != len(contract.batch_dimensions) + len(
-            entry.spec.shape
-        ):
+        tensor_axes = getattr(semantics.axes, name)
+        semantic_extents = {
+            semantics.coalition_axis: len(semantics.terms),
+            contract.agent_dimension: multi_agent.n_agents,
+        }
+        axes_with_declared_extents = set(tensor_axes) & set(semantic_extents)
+        if entry.spec is None and axes_with_declared_extents:
+            raise ValueError(f"value-decomposition {name} requires a spec to validate semantic-axis extents")
+        if entry.spec is not None and len(tensor_axes) != len(contract.batch_dimensions) + len(entry.spec.shape):
             raise ValueError(f"value-decomposition {name} axes do not match its declared tensor rank")
+        if entry.spec is not None:
+            for axis in axes_with_declared_extents:
+                feature_index = tensor_axes.index(axis) - len(contract.batch_dimensions)
+                if entry.spec.shape[feature_index] != semantic_extents[axis]:
+                    raise ValueError(f"value-decomposition {name} {axis} extent must be {semantic_extents[axis]}")
 
+    coalition_path = _key_path(semantics.keys.coalition_contribution)
     joint_path = _key_path(semantics.keys.joint_value)
     if not any(
-        _key_path(reduction.target_key) == joint_path and semantics.coalition_axis in reduction.reduced_axes
+        _key_path(reduction.source_key) == coalition_path
+        and _key_path(reduction.target_key) == joint_path
+        and semantics.coalition_axis in reduction.reduced_axes
         for reduction in semantics.reductions
     ):
-        raise ValueError("joint_value requires a named reduction over the coalition axis")
+        raise ValueError("joint_value requires a named reduction from coalition_contribution over the coalition axis")
     for reduction in semantics.reductions:
         if (
             _key_path(reduction.source_key) not in declared_paths

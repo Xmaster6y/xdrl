@@ -11,6 +11,7 @@ from typing import Any
 
 from packaging.version import InvalidVersion, Version
 from tdhook.workflow import CompatibilityDecision, PlannedExecution, WorkflowPlan
+from torchrl.data import UnboundedContinuous
 
 from xdrl.compatibility import installed_dependency_versions
 from xdrl.interactions import (
@@ -578,7 +579,16 @@ def _validate_canonical_contract(contract: Mapping[str, Any]) -> None:
     def schema(value: Mapping[str, Any]) -> TensorDictSchema:
         return TensorDictSchema(
             tuple(
-                KeySchema(tuple(item["path"]), KeyRole(item["role"]), KeyPresence(item["presence"]))
+                KeySchema(
+                    tuple(item["path"]),
+                    KeyRole(item["role"]),
+                    KeyPresence(item["presence"]),
+                    (
+                        UnboundedContinuous(shape=tuple(item["feature_shape"]))
+                        if item["feature_shape"] is not None
+                        else None
+                    ),
+                )
                 for item in value["keys"]
             ),
             BatchSemantics(tuple(value["batch_dimensions"])),
@@ -846,8 +856,8 @@ def _value_decomposition_projection(value: Any, field: str) -> dict[str, Any] | 
         reductions.append(
             {
                 "name": _nonempty_string(reduction["name"], f"{reduction_field}.name"),
-                "source_key": list(_key_path_value(reduction["source_key"], f"{reduction_field}.source_key")),
-                "target_key": list(_key_path_value(reduction["target_key"], f"{reduction_field}.target_key")),
+                "source_key": list(_value_key_path(reduction["source_key"], f"{reduction_field}.source_key")),
+                "target_key": list(_value_key_path(reduction["target_key"], f"{reduction_field}.target_key")),
                 "reduced_axes": list(_strings(reduction["reduced_axes"], f"{reduction_field}.reduced_axes")),
             }
         )
@@ -855,12 +865,17 @@ def _value_decomposition_projection(value: Any, field: str) -> dict[str, Any] | 
         "coalition_axis": _nonempty_string(entry["coalition_axis"], f"{field}.coalition_axis"),
         "feature_axes": list(_strings(entry["feature_axes"], f"{field}.feature_axes")),
         "terms": terms,
-        "keys": {name: list(_key_path_value(keys[name], f"{field}.keys.{name}")) for name in keys},
+        "keys": {name: list(_value_key_path(keys[name], f"{field}.keys.{name}")) for name in keys},
         "axes": {name: list(_strings(axes[name], f"{field}.axes.{name}")) for name in axes},
         "reductions": reductions,
         "parameters_shared": _boolean(entry["parameters_shared"], f"{field}.parameters_shared"),
         "coalition_targets": list(_strings(entry["coalition_targets"], f"{field}.coalition_targets")),
     }
+
+
+def _value_key_path(value: Any, field: str) -> tuple[str, ...]:
+    """Normalize a flat TensorDict key before strict provenance validation."""
+    return _key_path_value([value] if isinstance(value, str) else value, field)
 
 
 def _internal_coordinate(value: Any, field: str) -> str | int:

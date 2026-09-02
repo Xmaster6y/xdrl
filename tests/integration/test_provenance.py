@@ -278,7 +278,7 @@ def test_workflow_provenance_decodes_recurrent_and_multi_agent_contract_evidence
         "group": "agents",
         "n_agents": 2,
         "target": {"role": "actor", "selector": {"group": "agents", "agents": [0, "blue"]}},
-        "agent_identities": [],
+        "agent_identities": [0, "blue"],
     }
     restored = WorkflowProvenance.from_dict(payload)
     round_tripped = WorkflowProvenance.from_json(restored.to_json())
