@@ -19,8 +19,13 @@ extensions = [
     "sphinx_copybutton",  # Copy button for code blocks
     "sphinx_design",  # Boostrap design components
     "nbsphinx",  # Jupyter notebook support
-    "autoapi.extension",
+    "sphinxcontrib.bibtex",  # BibTeX citation support
+    "autoapi.extension",  # Auto documentation from code
 ]
+
+# BibTeX configuration
+bibtex_bibfiles = ["references.bib"]
+bibtex_default_style = "unsrt"
 
 templates_path = ["_templates"]
 exclude_patterns = []  # type: ignore

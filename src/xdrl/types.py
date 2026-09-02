@@ -1,8 +1,9 @@
 """TorchRL-native contracts for RL model roles and TensorDict schemas.
 
-The types in this module describe interfaces around TorchRL objects.  They do
-not introduce a container or a spec hierarchy: data remains a
-``TensorDictBase`` and value constraints remain TorchRL ``TensorSpec`` objects.
+The types in this module describe interfaces around TorchRL
+:cite:`bou2023torchrl` objects. They do not introduce a container or a spec
+hierarchy: data remains a ``TensorDictBase`` and value constraints remain
+TorchRL ``TensorSpec`` objects.
 """
 
 from __future__ import annotations
