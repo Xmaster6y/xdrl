@@ -98,10 +98,22 @@ Reproductions
 
       **Evidence status:** bounded smoke path only; paper checkpoints and result data are unavailable.
 
+   .. grid-item-card:: Expert-concept policies in simulated MARL
+      :link: reproductions/marl-concept-policy
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`comment-discussion;2em;sd-text-primary`
+
+      Matched concept-policy controls and frozen concept-correction interventions.
+
+      **Evidence status:** bounded synthetic smoke path only; FortAttack assets are unavailable.
+
 .. toctree::
    :hidden:
 
    reproductions/bixrl-functional-modularity.ipynb
    reproductions/emergent-planning-sokoban.ipynb
    reproductions/maze-policy-goal-representations.ipynb
+   reproductions/marl-concept-policy.ipynb
    reproductions/na2q-value-decomposition.ipynb
