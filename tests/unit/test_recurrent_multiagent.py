@@ -149,14 +149,18 @@ def test_recurrent_contract_rejects_bad_masks_and_unsupported_collectors() -> No
     [
         ((), 0, None, "at least one"),
         ((RecurrentStateTransition(("state",), ("next", "state")),), -1, None, "non-negative"),
+        ((RecurrentStateTransition(("state",), ("next", "state")),), True, None, "integer"),
+        ((RecurrentStateTransition(("state",), ("next", "state")),), 1.5, None, "integer"),
         ((RecurrentStateTransition(("state",), ("next", "state")),), 0, 0, "positive"),
+        ((RecurrentStateTransition(("state",), ("next", "state")),), 0, True, "integer"),
+        ((RecurrentStateTransition(("state",), ("next", "state")),), 0, 1.5, "integer"),
         ((RecurrentStateTransition(("state",), ("next", "state")),), 2, 2, "smaller"),
     ],
 )
 def test_recurrent_semantics_reject_invalid_windows(
     transitions: tuple[RecurrentStateTransition, ...],
-    burn_in: int,
-    truncated_window: int | None,
+    burn_in: int | float | bool,
+    truncated_window: int | float | bool | None,
     message: str,
 ) -> None:
     with pytest.raises(ValueError, match=message):
@@ -174,6 +178,10 @@ def test_agent_and_multi_agent_semantics_reject_invalid_selectors() -> None:
         MultiAgentSemantics(InteractionTopology.INDEPENDENT, "", 2, SemanticTarget(ModelRole.ACTOR, selector))
     with pytest.raises(ValueError, match="positive"):
         MultiAgentSemantics(InteractionTopology.INDEPENDENT, "agents", 0, SemanticTarget(ModelRole.ACTOR, selector))
+    with pytest.raises(ValueError, match="integer"):
+        MultiAgentSemantics(InteractionTopology.INDEPENDENT, "agents", True, SemanticTarget(ModelRole.ACTOR, selector))
+    with pytest.raises(ValueError, match="integer"):
+        MultiAgentSemantics(InteractionTopology.INDEPENDENT, "agents", 2.5, SemanticTarget(ModelRole.ACTOR, selector))
     with pytest.raises(ValueError, match="must match"):
         MultiAgentSemantics(
             InteractionTopology.INDEPENDENT,
@@ -187,6 +195,14 @@ def test_agent_and_multi_agent_semantics_reject_invalid_selectors() -> None:
             "agents",
             2,
             SemanticTarget(ModelRole.ACTOR, AgentSelector("agents", (2,))),
+        )
+    with pytest.raises(ValueError, match="outside"):
+        MultiAgentSemantics(
+            InteractionTopology.INDEPENDENT,
+            "agents",
+            2,
+            SemanticTarget(ModelRole.ACTOR, AgentSelector("agents", (True,))),
+            agent_identities=(0, 1),
         )
 
 
