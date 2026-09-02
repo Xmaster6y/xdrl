@@ -87,9 +87,21 @@ Reproductions
 
       **Evidence status:** bounded smoke path only; checkpoint provenance is incomplete.
 
+   .. grid-item-card:: NA2Q value decomposition in cooperative MARL
+      :link: reproductions/na2q-value-decomposition
+      :link-type: doc
+      :class-card: surface
+
+      :octicon:`people;2em;sd-text-primary`
+
+      Named unary/pair coalitions, identity masks, and additive joint-value parity.
+
+      **Evidence status:** bounded smoke path only; paper checkpoints and result data are unavailable.
+
 .. toctree::
    :hidden:
 
    reproductions/bixrl-functional-modularity.ipynb
    reproductions/emergent-planning-sokoban.ipynb
    reproductions/maze-policy-goal-representations.ipynb
+   reproductions/na2q-value-decomposition.ipynb
