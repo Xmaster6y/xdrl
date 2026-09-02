@@ -70,6 +70,7 @@ conformance and documentation gates.
 - [Getting Started](https://xdrl.readthedocs.io/en/latest/start.html)
 - [Tutorials](https://xdrl.readthedocs.io/en/latest/tutorials.html)
 - [API Reference](https://xdrl.readthedocs.io/en/latest/api/index.html)
+- [About](https://xdrl.readthedocs.io/en/latest/about.html)
 
 ## License
 `xdrl` is licensed under the MIT License. See [LICENSE](./LICENSE) for details.

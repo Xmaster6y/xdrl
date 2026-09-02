@@ -234,7 +234,7 @@ class PairedWorkflowExecutionError(RuntimeError):
 
 @dataclass(slots=True)
 class TDHookWorkflowRunner:
-    """Delegate TDHook v0.2 workflow planning and execution through XDRL."""
+    """Delegate TDHook :cite:`poupart2025tdhook` workflow execution through XDRL."""
 
     interaction: RuntimeInteractionContext
 

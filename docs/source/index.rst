@@ -11,6 +11,7 @@
     Getting Started <start>
     Tutorials <tutorials>
     API Reference <api/index>
+    About <about>
 
 .. grid:: 1 1 2 2
     :class-container: hero

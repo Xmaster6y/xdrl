@@ -142,6 +142,9 @@ class InternalOccurrenceSelection:
 class InternalComputationSemantics:
     """Serializable semantic axes and their exact per-root-call hook mapping.
 
+    Repeated internal computation is important in analyses of recurrent RL
+    agents such as :cite:`bush2025interpreting`.
+
     Environment time and sequence/burn-in remain owned by
     :class:`InteractionContract` and :class:`RecurrentSemantics`. These axes
     name only repeated computation inside one root model call. ``occurrences``
@@ -356,7 +359,12 @@ class NamedReduction:
 
 @dataclass(frozen=True, slots=True)
 class ValueDecompositionSemantics:
-    """Coalition identities, tensor axes, keys, and explicit aggregations."""
+    """Coalition identities, tensor axes, keys, and explicit aggregations.
+
+    The explicit coalition, identity, attention, and semantic-mask fields can
+    represent interpretable additive decompositions such as NA2Q
+    :cite:`pmlr-v202-liu23be` without implementing their learning algorithm.
+    """
 
     coalition_axis: str
     feature_axes: tuple[str, ...]
