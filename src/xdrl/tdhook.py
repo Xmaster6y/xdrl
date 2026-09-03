@@ -37,7 +37,9 @@ def _validate_execution_modes(interaction: Interaction, plan: WorkflowPlan) -> N
         if execution.gradient_mode is GradientMode.REQUIRED and (
             interaction.spec.inference_mode or not interaction.spec.gradient_enabled
         ):
-            raise ValueError("gradient-required TDHook execution requires gradient_enabled=True and inference_mode=False")
+            raise ValueError(
+                "gradient-required TDHook execution requires gradient_enabled=True and inference_mode=False"
+            )
         if execution.gradient_mode is GradientMode.DISABLED and interaction.spec.gradient_enabled:
             raise ValueError("gradient-disabled TDHook execution requires gradient_enabled=False")
 
