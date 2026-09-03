@@ -1,8 +1,7 @@
 Quickstart
 ==========
 
-Install XDRL and construct one typed boundary around an unchanged TorchRL
-module:
+Install XDRL and construct one boundary around an unchanged TorchRL module:
 
 .. code-block:: bash
 
@@ -13,40 +12,53 @@ module:
    import torch
    from tensordict import TensorDict
    from tensordict.nn import TensorDictModule
-   from xdrl import (
-       BatchSemantics,
-       Interaction,
-       InteractionSpec,
-       KeyRole,
-       KeySchema,
-       ModelRole,
-       TensorDictSchema,
-   )
+   from xdrl import Interaction
 
    policy = TensorDictModule(
        torch.nn.Linear(4, 2),
        in_keys=["observation"],
        out_keys=["action"],
    )
-   interaction = Interaction(
-       policy,
-       InteractionSpec(
-           ModelRole.ACTOR,
-           TensorDictSchema((KeySchema("observation", KeyRole.OBSERVATION),)),
-           TensorDictSchema((KeySchema("action", KeyRole.ACTION),)),
-           BatchSemantics(("env",)),
-       ),
+   interaction = Interaction(policy)
+   batch = TensorDict(
+       {"observation": torch.randn(8, 4)},
+       batch_size=[8],
+       names=["env"],
    )
-   batch = TensorDict({"observation": torch.randn(8, 4)}, batch_size=[8])
 
    result = interaction(batch)
    assert result["action"].shape == (8, 2)
 
+The TorchRL module remains the source of truth for keys and specs. XDRL only
+adds semantic checks that the upstream objects do not express. For example,
+TorchRL recurrent modules can use their native ``next`` and ``is_init``
+conventions directly:
+
+.. code-block:: python
+
+   from torchrl.modules import LSTMModule
+   from xdrl import RecurrentSemantics
+
+   recurrent_policy = LSTMModule(
+       input_size=4,
+       hidden_size=8,
+       in_key="observation",
+       out_key="embedding",
+   )
+   recurrent = RecurrentSemantics.from_torchrl(
+       "recurrent_state_h",
+       "recurrent_state_c",
+   )
+   recurrent_interaction = Interaction(
+       recurrent_policy,
+       recurrent,
+   )
+
 TDHook workflows
 ----------------
 
-``run_workflow`` is the only XDRL workflow entrypoint. It returns TDHook's
-native ``WorkflowResult`` without re-planning or reproducing hook state:
+``run_workflow`` is the only XDRL workflow entrypoint. It delegates planning
+and execution to TDHook and returns TDHook's native ``WorkflowResult``:
 
 .. code-block:: python
 

@@ -2,130 +2,76 @@ import pytest
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
+from torchrl.modules import LSTMModule
 
-from xdrl import (
-    BatchSemantics,
-    Interaction,
-    InteractionSpec,
-    KeyRole,
-    KeySchema,
-    ModelRole,
-    RecurrentSemantics,
-    RecurrentStateTransition,
-    TensorDictSchema,
-)
+from xdrl import Interaction, RecurrentSemantics, RecurrentStateTransition
 
 
-class RecurrentCell(torch.nn.Module):
-    def forward(self, observation: torch.Tensor, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        next_state = state + observation
-        return next_state, next_state
+def test_torchrl_lstm_conventions_are_supported_directly() -> None:
+    module = LSTMModule(input_size=3, hidden_size=4, in_key="observation", out_key="embedding")
+    recurrent = RecurrentSemantics.from_torchrl("recurrent_state_h", "recurrent_state_c")
+    interaction = Interaction(module, recurrent)
+    data = TensorDict(
+        {
+            "observation": torch.ones(2, 3),
+            "recurrent_state_h": torch.zeros(2, 1, 4),
+            "recurrent_state_c": torch.zeros(2, 1, 4),
+            "is_init": torch.zeros(2, 1, dtype=torch.bool),
+        },
+        batch_size=[2],
+    )
+
+    result = interaction(data)
+
+    assert result["next", "recurrent_state_h"].shape == data["recurrent_state_h"].shape
+    assert result["next", "recurrent_state_c"].shape == data["recurrent_state_c"].shape
 
 
-class MismatchedRecurrentCell(torch.nn.Module):
-    def forward(self, observation: torch.Tensor, state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        next_state = state[:, :-1] + observation[:, :-1]
-        return state + observation, next_state
-
-
-def _interaction(cell: torch.nn.Module | None = None) -> Interaction:
-    inputs = TensorDictSchema(
-        (
-            KeySchema("observation", KeyRole.OBSERVATION),
-            KeySchema("state", KeyRole.STATE),
-            KeySchema("reset", KeyRole.TERMINATION),
+def test_recurrent_semantics_must_match_module_keys() -> None:
+    module = TensorDictModule(torch.nn.Identity(), ["state"], ["next_state"])
+    with pytest.raises(ValueError, match="is not a module input"):
+        Interaction(module, recurrent=RecurrentSemantics((RecurrentStateTransition("missing", "next_state"),)))
+    with pytest.raises(ValueError, match="is not a module output"):
+        Interaction(module, recurrent=RecurrentSemantics((RecurrentStateTransition("state", "missing"),)))
+    with pytest.raises(ValueError, match="reset key .* is not a module input"):
+        Interaction(
+            module,
+            recurrent=RecurrentSemantics(
+                (RecurrentStateTransition("state", "next_state"),),
+                reset_keys=("is_init",),
+            ),
         )
-    )
-    outputs = TensorDictSchema((KeySchema("action", KeyRole.ACTION), KeySchema("next_state", KeyRole.STATE)))
-    spec = InteractionSpec(
-        ModelRole.ACTOR,
-        inputs,
-        outputs,
-        BatchSemantics(("env",)),
-        recurrent=RecurrentSemantics(
-            (RecurrentStateTransition("state", "next_state"),),
-            reset_keys=("reset",),
-        ),
-    )
-    module = TensorDictModule(
-        RecurrentCell() if cell is None else cell,
-        in_keys=["observation", "state"],
-        out_keys=["action", "next_state"],
-    )
-    return Interaction(module, spec)
-
-
-def test_recurrent_transition_is_checked_at_the_boundary() -> None:
-    data = TensorDict(
-        {
-            "observation": torch.ones(2, 3),
-            "state": torch.zeros(2, 3),
-            "reset": torch.zeros(2, dtype=torch.bool),
-        },
-        batch_size=[2],
-    )
-
-    result = _interaction()(data)
-
-    assert result["next_state"].shape == data["state"].shape
-
-
-def test_recurrent_transition_rejects_changed_state_shape() -> None:
-    data = TensorDict(
-        {
-            "observation": torch.ones(2, 3),
-            "state": torch.zeros(2, 3),
-            "reset": torch.zeros(2, dtype=torch.bool),
-        },
-        batch_size=[2],
-    )
-
-    with pytest.raises(ValueError, match="changed shape or dtype"):
-        _interaction(MismatchedRecurrentCell())(data)
 
 
 def test_recurrent_reset_must_be_boolean() -> None:
+    module = TensorDictModule(
+        lambda state: state,
+        ["state", "is_init"],
+        [("next", "state")],
+    )
+    interaction = Interaction(
+        module,
+        RecurrentSemantics.from_torchrl("state"),
+    )
     data = TensorDict(
-        {"observation": torch.ones(2, 3), "state": torch.zeros(2, 3), "reset": torch.zeros(2)},
+        {"state": torch.zeros(2, 3), "is_init": torch.zeros(2)},
         batch_size=[2],
     )
+
     with pytest.raises(ValueError, match="boolean"):
-        _interaction()(data)
+        interaction(data)
 
 
-def test_recurrent_keys_must_be_declared_state_boundaries() -> None:
-    with pytest.raises(ValueError, match="required state inputs"):
-        InteractionSpec(
-            ModelRole.ACTOR,
-            TensorDictSchema((KeySchema("state", KeyRole.FEATURE),)),
-            TensorDictSchema((KeySchema("next_state", KeyRole.STATE),)),
-            recurrent=RecurrentSemantics((RecurrentStateTransition("state", "next_state"),)),
-        )
-    with pytest.raises(ValueError, match="required state outputs"):
-        InteractionSpec(
-            ModelRole.ACTOR,
-            TensorDictSchema((KeySchema("state", KeyRole.STATE),)),
-            TensorDictSchema((KeySchema("next_state", KeyRole.FEATURE),)),
-            recurrent=RecurrentSemantics((RecurrentStateTransition("state", "next_state"),)),
-        )
+def test_recurrent_transition_rejects_changed_shape() -> None:
+    module = TensorDictModule(lambda state: state[:, :-1], ["state"], [("next", "state")])
+    interaction = Interaction(
+        module,
+        RecurrentSemantics((RecurrentStateTransition("state", ("next", "state")),)),
+    )
+    data = TensorDict({"state": torch.zeros(2, 3)}, batch_size=[2])
 
-
-def test_recurrent_reset_keys_must_be_required() -> None:
-    with pytest.raises(ValueError, match="must be a required input"):
-        InteractionSpec(
-            ModelRole.ACTOR,
-            TensorDictSchema(
-                (
-                    KeySchema("state", KeyRole.STATE),
-                    KeySchema("reset", KeyRole.TERMINATION, required=False),
-                )
-            ),
-            TensorDictSchema((KeySchema("next_state", KeyRole.STATE),)),
-            recurrent=RecurrentSemantics(
-                (RecurrentStateTransition("state", "next_state"),),
-                reset_keys=("reset",),
-            ),
-        )
+    with pytest.raises(ValueError, match="changed shape or dtype"):
+        interaction(data)
 
 
 def test_recurrent_semantics_reject_empty_and_duplicate_keys() -> None:
@@ -141,5 +87,5 @@ def test_recurrent_semantics_reject_empty_and_duplicate_keys() -> None:
     with pytest.raises(ValueError, match="reset keys must be unique"):
         RecurrentSemantics(
             (RecurrentStateTransition("state", "next_state"),),
-            reset_keys=("reset", "reset"),
+            reset_keys=("is_init", "is_init"),
         )

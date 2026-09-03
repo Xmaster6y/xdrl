@@ -1,33 +1,29 @@
-"""One typed execution boundary around an existing TorchRL module."""
+"""RL semantics around one native TorchRL module call."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
-from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 
 import torch
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
-from torchrl.envs.utils import set_exploration_type
-
-from xdrl.types import BatchSemantics, KeyRole, ModelRole, TensorDictKey, TensorDictSchema
+from tensordict.utils import NestedKey
 
 
 @dataclass(frozen=True, slots=True)
 class RecurrentStateTransition:
-    """A state key consumed now and its corresponding next-state key."""
+    """A recurrent input key and the output key containing its next value."""
 
-    input_key: TensorDictKey
-    output_key: TensorDictKey
+    input_key: NestedKey
+    output_key: NestedKey
 
 
 @dataclass(frozen=True, slots=True)
 class RecurrentSemantics:
-    """The recurrent state and reset keys that affect boundary validation."""
+    """Recurrent state transitions and reset keys for one module call."""
 
     transitions: tuple[RecurrentStateTransition, ...]
-    reset_keys: tuple[TensorDictKey, ...] = ()
+    reset_keys: tuple[NestedKey, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.transitions:
@@ -40,143 +36,83 @@ class RecurrentSemantics:
         if len(set(reset_paths)) != len(reset_paths):
             raise ValueError("recurrent reset keys must be unique")
 
+    @classmethod
+    def from_torchrl(cls, *state_keys: NestedKey, reset_key: NestedKey = "is_init") -> RecurrentSemantics:
+        """Use TorchRL's ``next`` and ``is_init`` recurrent conventions."""
 
-@dataclass(frozen=True, slots=True)
-class InteractionSpec:
-    """The complete static contract for one TorchRL module call."""
-
-    role: ModelRole
-    inputs: TensorDictSchema
-    outputs: TensorDictSchema
-    batch: BatchSemantics = BatchSemantics()
-    recurrent: RecurrentSemantics | None = None
-    training: bool | None = None
-    gradient_enabled: bool = False
-    inference_mode: bool = False
-    exploration_mode: str | None = None
-    autocast_device_type: str | None = None
-    autocast_enabled: bool = False
-
-    def __post_init__(self) -> None:
-        if self.inference_mode and self.gradient_enabled:
-            raise ValueError("inference_mode and gradient_enabled cannot both be enabled")
-        if self.autocast_enabled and self.autocast_device_type is None:
-            raise ValueError("autocast_enabled requires autocast_device_type")
-        if self.training is not None and type(self.training) is not bool:
-            raise TypeError("training must be a boolean or None")
-        if self.recurrent is not None:
-            _validate_recurrent_spec(self)
+        return cls(
+            tuple(RecurrentStateTransition(key, ("next", *_key_path(key))) for key in state_keys),
+            reset_keys=(reset_key,),
+        )
 
 
 @dataclass(slots=True)
 class Interaction:
-    """Validate and execute one unchanged TensorDict module.
+    """Validate the RL boundary of an unchanged TensorDict module.
 
-    XDRL owns only this boundary. TensorDict and TorchRL own the data and model;
-    TDHook owns model-internal hooks, targets, and workflow execution.
+    The module remains the source of truth for required input keys, produced
+    output keys, and any TorchRL ``SafeModule`` specs.
     """
 
     module: TensorDictModuleBase
-    spec: InteractionSpec
+    recurrent: RecurrentSemantics | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.module, TensorDictModuleBase):
             raise TypeError("Interaction requires a TensorDictModuleBase")
+        if self.recurrent is not None:
+            _validate_recurrent_module(self.module, self.recurrent)
 
     def __call__(self, data: TensorDictBase) -> TensorDictBase:
-        """Validate and execute the module once."""
+        """Run the module once under the caller's native Torch state."""
 
-        return self._invoke(data, self.module)
-
-    def validate_input(self, data: TensorDictBase) -> None:
-        self.spec.inputs.validate(data, self.spec.batch, boundary="interaction input")
-        recurrent = self.spec.recurrent
-        if recurrent is None:
-            return
-        for key in recurrent.reset_keys:
-            reset = data.get(key)
-            if not isinstance(reset, torch.Tensor) or reset.dtype is not torch.bool:
-                raise ValueError(f"recurrent reset key {'/'.join(_key_path(key))} must contain a boolean tensor")
-
-    def validate_output(self, inputs: TensorDictBase, outputs: TensorDictBase) -> None:
-        self.spec.outputs.validate(outputs, self.spec.batch, boundary="interaction output")
-        recurrent = self.spec.recurrent
-        if recurrent is None:
-            return
-        for transition in recurrent.transitions:
-            previous = inputs.get(transition.input_key)
-            following = outputs.get(transition.output_key)
-            if not isinstance(previous, torch.Tensor) or not isinstance(following, torch.Tensor):
-                raise ValueError("recurrent state transitions must connect tensor-valued keys")
-            if previous.shape != following.shape or previous.dtype != following.dtype:
-                raise ValueError(
-                    f"recurrent state transition {'/'.join(_key_path(transition.input_key))} -> "
-                    f"{'/'.join(_key_path(transition.output_key))} changed shape or dtype"
-                )
-
-    def _invoke(
-        self,
-        data: TensorDictBase,
-        operation: Callable[[TensorDictBase], TensorDictBase],
-    ) -> TensorDictBase:
         self.validate_input(data)
-        with self._execution_scope():
-            result = operation(data)
-        if not isinstance(result, TensorDictBase):
-            raise TypeError(f"interaction module must return a TensorDict, got {type(result).__name__}")
+        result = self.module(data)
         self.validate_output(data, result)
         return result
 
-    @contextmanager
-    def _execution_scope(self) -> Iterator[None]:
-        with ExitStack() as stack:
-            if self.spec.training is not None:
-                states = tuple((module, module.training) for module in self.module.modules())
-                self.module.train(self.spec.training)
-                stack.callback(_restore_training_states, states)
-            if self.spec.exploration_mode is not None:
-                stack.enter_context(set_exploration_type(self.spec.exploration_mode))
-            stack.enter_context(torch.inference_mode(self.spec.inference_mode))
-            if not self.spec.inference_mode:
-                stack.enter_context(torch.set_grad_enabled(self.spec.gradient_enabled))
-            if self.spec.autocast_device_type is not None:
-                stack.enter_context(
-                    torch.autocast(
-                        device_type=self.spec.autocast_device_type,
-                        enabled=self.spec.autocast_enabled,
+    def validate_input(self, data: TensorDictBase) -> None:
+        if not isinstance(data, TensorDictBase):
+            raise TypeError(f"interaction input must be a TensorDict, got {type(data).__name__}")
+        if self.recurrent is not None:
+            for key in self.recurrent.reset_keys:
+                reset = data.get(key)
+                if not isinstance(reset, torch.Tensor) or reset.dtype is not torch.bool:
+                    raise ValueError(f"recurrent reset key {'/'.join(_key_path(key))} must contain a boolean tensor")
+
+    def validate_output(self, inputs: TensorDictBase, outputs: TensorDictBase) -> None:
+        if not isinstance(outputs, TensorDictBase):
+            raise TypeError(f"interaction module must return a TensorDict, got {type(outputs).__name__}")
+        if self.recurrent is not None:
+            for transition in self.recurrent.transitions:
+                previous = inputs.get(transition.input_key)
+                following = outputs.get(transition.output_key)
+                if not isinstance(previous, torch.Tensor) or not isinstance(following, torch.Tensor):
+                    raise ValueError("recurrent state transitions must connect tensor-valued keys")
+                if previous.shape != following.shape or previous.dtype != following.dtype:
+                    raise ValueError(
+                        f"recurrent state transition {'/'.join(_key_path(transition.input_key))} -> "
+                        f"{'/'.join(_key_path(transition.output_key))} changed shape or dtype"
                     )
-                )
-            yield
 
 
-def _validate_recurrent_spec(spec: InteractionSpec) -> None:
-    recurrent = spec.recurrent
-    assert recurrent is not None
+def _validate_recurrent_module(module: TensorDictModuleBase, recurrent: RecurrentSemantics) -> None:
+    input_paths = {_key_path(key) for key in module.in_keys}
+    output_paths = {_key_path(key) for key in module.out_keys}
     for transition in recurrent.transitions:
-        input_entry = spec.inputs.entry(transition.input_key)
-        output_entry = spec.outputs.entry(transition.output_key)
-        if input_entry is None or input_entry.role is not KeyRole.STATE or not input_entry.required:
-            raise ValueError("recurrent input keys must be required state inputs")
-        if output_entry is None or output_entry.role is not KeyRole.STATE or not output_entry.required:
-            raise ValueError("recurrent output keys must be required state outputs")
-    for reset_key in recurrent.reset_keys:
-        entry = spec.inputs.entry(reset_key)
-        if entry is None or not entry.required:
-            raise ValueError(f"recurrent reset key {'/'.join(_key_path(reset_key))} must be a required input")
+        if _key_path(transition.input_key) not in input_paths:
+            raise ValueError(f"recurrent state key {'/'.join(_key_path(transition.input_key))} is not a module input")
+        if _key_path(transition.output_key) not in output_paths:
+            raise ValueError(
+                f"recurrent next-state key {'/'.join(_key_path(transition.output_key))} is not a module output"
+            )
+    for key in recurrent.reset_keys:
+        if _key_path(key) not in input_paths:
+            raise ValueError(f"recurrent reset key {'/'.join(_key_path(key))} is not a module input")
 
 
-def _restore_training_states(states: tuple[tuple[torch.nn.Module, bool], ...]) -> None:
-    for module, training in states:
-        module.training = training
-
-
-def _key_path(key: TensorDictKey) -> tuple[str, ...]:
+def _key_path(key: NestedKey) -> tuple[str, ...]:
     return (key,) if isinstance(key, str) else tuple(key)
 
 
-__all__ = [
-    "Interaction",
-    "InteractionSpec",
-    "RecurrentSemantics",
-    "RecurrentStateTransition",
-]
+__all__ = ["Interaction", "RecurrentSemantics", "RecurrentStateTransition"]

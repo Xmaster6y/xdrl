@@ -1,7 +1,7 @@
 [project]
 name = "xdrl"
 version = "0.2.0"
-description = "Typed TorchRL interaction boundaries with native TDHook workflows."
+description = "A small integration layer for TorchRL modules and TDHook workflows."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

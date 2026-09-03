@@ -4,12 +4,12 @@ Tutorials
 .. grid:: 1 2 2 2
    :gutter: 3
 
-   .. grid-item-card:: One typed interaction
+   .. grid-item-card:: One interaction
       :link: notebooks/collection
       :link-type: doc
       :class-card: surface
 
-      Run an unchanged TorchRL policy through one typed interaction.
+      Run an unchanged TorchRL policy through one interaction.
 
    .. grid-item-card:: Native TDHook workflow
       :link: notebooks/workflow-evidence

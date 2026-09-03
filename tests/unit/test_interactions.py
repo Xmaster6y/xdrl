@@ -1,131 +1,83 @@
 import pytest
 import torch
-from tensordict import TensorDict
-from tensordict.nn import TensorDictModule
+from tensordict import TensorDict, TensorDictBase
+from tensordict.nn import TensorDictModule, TensorDictModuleBase
+from torchrl.data import Bounded
+from torchrl.modules import SafeModule
 
-from xdrl import (
-    BatchSemantics,
-    Interaction,
-    InteractionSpec,
-    KeyRole,
-    KeySchema,
-    ModelRole,
-    SchemaValidationError,
-    TensorDictSchema,
-)
+from xdrl import Interaction
 
 
-def _interaction(module: torch.nn.Module | None = None, **modes: object) -> Interaction:
+def _interaction(module: torch.nn.Module | None = None) -> Interaction:
     policy = TensorDictModule(
         torch.nn.Linear(2, 1, bias=False) if module is None else module,
         in_keys=["observation"],
         out_keys=["action"],
     )
-    spec = InteractionSpec(
-        ModelRole.ACTOR,
-        TensorDictSchema((KeySchema("observation", KeyRole.OBSERVATION),)),
-        TensorDictSchema((KeySchema("action", KeyRole.ACTION),)),
-        BatchSemantics(("env",)),
-        **modes,
-    )
-    return Interaction(policy, spec)
+    return Interaction(policy)
 
 
-def test_interaction_runs_an_unchanged_torchrl_module() -> None:
+def test_interaction_uses_module_keys_as_the_boundary() -> None:
     interaction = _interaction()
-    data = TensorDict({"observation": torch.ones(3, 2)}, batch_size=[3])
+    data = TensorDict({"observation": torch.ones(3, 2)}, batch_size=[3], names=["env"])
 
     result = interaction(data)
 
+    assert interaction.module.in_keys == ["observation"]
+    assert interaction.module.out_keys == ["action"]
     assert result["action"].shape == (3, 1)
-    assert not hasattr(interaction.module, "input_schema")
+    assert result.names == ["env"]
 
 
-def test_interaction_validates_both_boundaries() -> None:
-    interaction = _interaction()
-    with pytest.raises(SchemaValidationError, match="interaction input"):
-        interaction(TensorDict({}, batch_size=[2]))
-
-    valid = _interaction(torch.nn.Identity())
-    invalid = Interaction(
-        valid.module,
-        InteractionSpec(
-            ModelRole.ACTOR,
-            valid.spec.inputs,
-            TensorDictSchema((KeySchema("missing_action", KeyRole.ACTION),)),
-            valid.spec.batch,
-        ),
+def test_interaction_preserves_torchrl_safe_module_specs() -> None:
+    policy = SafeModule(
+        lambda observation: observation * 10,
+        in_keys=["observation"],
+        out_keys=["action"],
+        spec=Bounded(low=-1, high=1, shape=(1,)),
+        safe=True,
     )
-    with pytest.raises(SchemaValidationError, match="interaction output"):
-        invalid(TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2]))
+    data = TensorDict({"observation": torch.tensor([[0.5], [-0.5]])}, batch_size=[2])
+
+    result = Interaction(policy)(data)
+
+    torch.testing.assert_close(result["action"], torch.tensor([[1.0], [-1.0]]))
 
 
-class _ModeProbe(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.child = torch.nn.Identity()
-        self.seen: list[tuple[bool, bool]] = []
+def test_interaction_rejects_invalid_module_and_result_types() -> None:
+    with pytest.raises(TypeError, match="TensorDictModuleBase"):
+        Interaction(torch.nn.Linear(2, 1))  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="interaction input must be a TensorDict"):
+        _interaction()(object())  # type: ignore[arg-type]
 
-    def forward(self, value: torch.Tensor) -> torch.Tensor:
-        self.seen.append((self.training, torch.is_grad_enabled()))
-        return value[:, :1]
+    class InvalidOutput(TensorDictModuleBase):
+        in_keys = ["observation"]
+        out_keys = ["action"]
 
+        def forward(self, data: TensorDictBase) -> object:
+            return object()
 
-def test_interaction_scopes_and_restores_training_and_gradient_modes() -> None:
-    probe = _ModeProbe()
-    interaction = _interaction(probe, training=False, gradient_enabled=False)
-    interaction.module.train()
-    probe.child.eval()
-
-    interaction(TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2]))
-
-    assert probe.seen == [(False, False)]
-    assert interaction.module.training and probe.training
-    assert not probe.child.training
+    with pytest.raises(TypeError, match="module must return a TensorDict"):
+        Interaction(InvalidOutput())(TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2]))
 
 
-def test_interaction_restores_modes_after_failure() -> None:
-    class Failing(torch.nn.Module):
+def test_interaction_preserves_caller_owned_torch_state() -> None:
+    class Probe(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.states: list[tuple[bool, bool]] = []
+
         def forward(self, value: torch.Tensor) -> torch.Tensor:
-            raise RuntimeError("boom")
+            self.states.append((self.training, torch.is_grad_enabled()))
+            return value[:, :1]
 
-    interaction = _interaction(Failing(), training=False)
-    interaction.module.train()
-
-    with pytest.raises(RuntimeError, match="boom"):
-        interaction(TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2]))
-    assert interaction.module.training
-
-
-def test_interaction_rejects_invalid_module_results() -> None:
-    interaction = _interaction()
+    probe = Probe()
+    probe.eval()
+    interaction = _interaction(probe)
     data = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
 
-    with pytest.raises(TypeError, match="must return a TensorDict"):
-        interaction._invoke(data, lambda _: object())  # type: ignore[arg-type]
+    with torch.no_grad():
+        interaction(data)
 
-
-def test_interaction_rejects_non_tensordict_modules() -> None:
-    with pytest.raises(TypeError, match="TensorDictModuleBase"):
-        Interaction(torch.nn.Linear(2, 1), _interaction().spec)  # type: ignore[arg-type]
-
-
-def test_interaction_scopes_exploration_and_autocast() -> None:
-    interaction = _interaction(
-        exploration_mode="random",
-        autocast_device_type="cpu",
-        autocast_enabled=False,
-    )
-
-    result = interaction(TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2]))
-
-    assert result["action"].shape == (2, 1)
-
-
-def test_interaction_spec_rejects_conflicting_modes() -> None:
-    with pytest.raises(ValueError, match="cannot both"):
-        _interaction(gradient_enabled=True, inference_mode=True)
-    with pytest.raises(ValueError, match="requires autocast_device_type"):
-        _interaction(autocast_enabled=True)
-    with pytest.raises(TypeError, match="training must be"):
-        _interaction(training="eval")
+    assert probe.states == [(False, False)]
+    assert not probe.training

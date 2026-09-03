@@ -67,7 +67,7 @@
 
       :octicon:`play;2em;sd-text-primary`
 
-      Run one typed model interaction.
+      Run one model interaction.
 
    .. grid-item-card:: Tutorials
       :link: tutorials
@@ -85,4 +85,4 @@
 
       :octicon:`code-square;2em;sd-text-primary`
 
-      Browse generated modules and types.
+      Browse the generated API.
