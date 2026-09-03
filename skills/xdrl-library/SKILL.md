@@ -33,6 +33,37 @@ provenance format, trainer, data container, or paired-experiment subsystem.
 
 `run_workflow` returns TDHook's native `WorkflowResult`.
 
+<!-- runnable-example -->
+```python
+import torch
+from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
+from tdhook.latent import ActivationCaching
+from tdhook.workflow import Workflow
+from xdrl import BatchSemantics, Interaction, InteractionSpec, KeyRole
+from xdrl import KeySchema, ModelRole, TensorDictSchema, run_workflow
+
+policy = TensorDictModule(torch.nn.Linear(4, 2), ["observation"], ["action"])
+spec = InteractionSpec(
+    ModelRole.ACTOR,
+    TensorDictSchema((KeySchema("observation", KeyRole.OBSERVATION),)),
+    TensorDictSchema((KeySchema("action", KeyRole.ACTION),)),
+    BatchSemantics(("env",)),
+)
+interaction = Interaction(policy, spec)
+data = TensorDict({"observation": torch.randn(8, 4)}, batch_size=[8])
+
+native = interaction(data.clone())
+result = run_workflow(
+    interaction,
+    Workflow(ActivationCaching("module", cache_key=("activations", "policy"))),
+    data.clone(),
+)
+
+assert native["action"].shape == (8, 2)
+assert result.plan.model_passes == 1
+```
+
 Installation and local execution do not by themselves establish behavioral or
 scientific conclusions. Name the exact tests or experiment controls supporting
 such claims.

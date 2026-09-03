@@ -4,7 +4,7 @@ Tutorials
 .. grid:: 1 2 2 2
    :gutter: 3
 
-   .. grid-item-card:: Local collection
+   .. grid-item-card:: One typed interaction
       :link: notebooks/collection
       :link-type: doc
       :class-card: surface

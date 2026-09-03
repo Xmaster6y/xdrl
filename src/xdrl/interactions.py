@@ -160,8 +160,9 @@ def _validate_recurrent_spec(spec: InteractionSpec) -> None:
         if output_entry is None or output_entry.role is not KeyRole.STATE or not output_entry.required:
             raise ValueError("recurrent output keys must be required state outputs")
     for reset_key in recurrent.reset_keys:
-        if spec.inputs.entry(reset_key) is None:
-            raise ValueError(f"recurrent reset key {'/'.join(_key_path(reset_key))} is not an input")
+        entry = spec.inputs.entry(reset_key)
+        if entry is None or not entry.required:
+            raise ValueError(f"recurrent reset key {'/'.join(_key_path(reset_key))} must be a required input")
 
 
 def _restore_training_states(states: tuple[tuple[torch.nn.Module, bool], ...]) -> None:

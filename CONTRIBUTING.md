@@ -26,25 +26,9 @@ To run the tests (using `pytest`):
 just tests
 ```
 
-## Refreshing development dependencies
-
-Refresh the development lock from a clean branch, review the resolved
-revisions, and run the normal gates:
-
-```bash
-uv lock
-just checks
-just tests
-just docs
-```
-
-The lockfile records the tested development environment; it is not a second
-runtime compatibility API. Keep a failed dependency proposal intact for
-diagnosis rather than weakening package constraints to make it pass.
-
 ## Branches
 
-Make a branch before making a pull request to `develop`.
+Make a branch before making a pull request to `main`.
 
 ## Scientific reproduction notebooks
 

@@ -24,4 +24,9 @@ def test_typed_interaction_preserves_native_output() -> None:
 
     actual = interaction(data.clone())
 
-    torch.testing.assert_close(actual["action"], expected["action"])
+    expected_keys = set(expected.keys(include_nested=True, leaves_only=True))
+    actual_keys = set(actual.keys(include_nested=True, leaves_only=True))
+    assert actual_keys == expected_keys
+    for key in expected_keys:
+        torch.testing.assert_close(actual[key], expected[key])
+        assert actual[key].requires_grad is expected[key].requires_grad

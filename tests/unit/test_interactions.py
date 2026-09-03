@@ -75,11 +75,13 @@ def test_interaction_scopes_and_restores_training_and_gradient_modes() -> None:
     probe = _ModeProbe()
     interaction = _interaction(probe, training=False, gradient_enabled=False)
     interaction.module.train()
+    probe.child.eval()
 
     interaction(TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2]))
 
     assert probe.seen == [(False, False)]
-    assert interaction.module.training and probe.training and probe.child.training
+    assert interaction.module.training and probe.training
+    assert not probe.child.training
 
 
 def test_interaction_restores_modes_after_failure() -> None:

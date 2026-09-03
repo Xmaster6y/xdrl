@@ -2,6 +2,7 @@ import pytest
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
+from tdhook.execution import ExecutionSpec, GradientMode
 from tdhook.latent import ActivationCaching
 from tdhook.targets import Target
 from tdhook.workflow import Workflow, WorkflowResult
@@ -23,12 +24,20 @@ class ReusedLayer(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.shared = torch.nn.Identity()
+        self.calls = 0
 
     def forward(self, value: torch.Tensor) -> torch.Tensor:
+        self.calls += 1
         return self.shared(value + 1) + self.shared(value + 2)
 
 
-def _interaction() -> Interaction:
+class GradientCaching(ActivationCaching):
+    @property
+    def execution_spec(self) -> ExecutionSpec:
+        return ExecutionSpec(gradient_mode=GradientMode.REQUIRED)
+
+
+def _interaction(*, gradient_enabled: bool = False) -> Interaction:
     module = TensorDictModule(ReusedLayer(), in_keys=["observation"], out_keys=["action"])
     spec = InteractionSpec(
         ModelRole.ACTOR,
@@ -36,6 +45,7 @@ def _interaction() -> Interaction:
         TensorDictSchema((KeySchema("action", KeyRole.ACTION),)),
         BatchSemantics(("env",)),
         training=False,
+        gradient_enabled=gradient_enabled,
     )
     return Interaction(module, spec)
 
@@ -71,3 +81,16 @@ def test_tdhook_owns_repeated_occurrence_selection() -> None:
 def test_run_workflow_validates_xdrl_boundaries() -> None:
     with pytest.raises(SchemaValidationError, match="interaction input"):
         run_workflow(_interaction(), Workflow(ActivationCaching("module.shared")), TensorDict({}, batch_size=[1]))
+
+
+@pytest.mark.integration
+def test_run_workflow_rejects_gradient_mismatch_before_execution() -> None:
+    interaction = _interaction()
+    workflow = Workflow(GradientCaching("module.shared"))
+    data = TensorDict({"observation": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
+
+    with pytest.raises(ValueError, match="requires gradient_enabled=True"):
+        run_workflow(interaction, workflow, data)
+
+    assert interaction.module.module.calls == 0
+    assert not interaction.module.module.shared._forward_hooks
