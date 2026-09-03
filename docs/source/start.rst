@@ -57,8 +57,9 @@ conventions directly:
 TDHook workflows
 ----------------
 
-``run_workflow`` is the only XDRL workflow entrypoint. It delegates planning
-and execution to TDHook and returns TDHook's native ``WorkflowResult``:
+``run_workflow`` is the only XDRL workflow entrypoint. It validates the
+caller's Torch state against TDHook's public plan, delegates execution to
+TDHook, and returns TDHook's native ``WorkflowResult``:
 
 .. code-block:: python
 

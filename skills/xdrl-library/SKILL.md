@@ -34,7 +34,8 @@ TensorDict's `batch_size` and dimension names describe the batch. The module's
 need native spec enforcement. Use
 `RecurrentSemantics.from_torchrl(...)` for TorchRL's `next` and `is_init`
 conventions. The caller owns training, autograd, inference, exploration, and
-autocast contexts.
+autocast contexts; `run_workflow` checks autograd against TDHook's declared
+requirements before execution.
 
 `run_workflow` returns TDHook's native `WorkflowResult`.
 
