@@ -6,6 +6,7 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.modules import (
     ActorCriticOperator,
+    ActorValueOperator,
     ProbabilisticActor,
     QValueActor,
     QValueModule,
@@ -62,6 +63,11 @@ def test_known_torchrl_modules_expose_their_native_rl_functions() -> None:
     actor_view = interpret(actor)
     assert actor_view.actor.module is actor
     assert actor_view(TensorDict({"observation": torch.zeros(2, 3)}, batch_size=[2]))["action"].shape == (2, 2)
+    actor_result = actor_view.run(
+        Workflow(ActivationCaching("module.0.module.0", cache_key=("activations", "actor"))),
+        TensorDict({"observation": torch.zeros(2, 3)}, batch_size=[2]),
+    )
+    assert actor_result.data["activations", "actor", "module.0.module.0"].shape == (2, 4)
 
     qvalue = QValueActor(torch.nn.Linear(3, 2), in_keys=["observation"], action_space="categorical")
     qvalue_view = interpret(qvalue)
@@ -74,6 +80,19 @@ def test_known_torchrl_modules_expose_their_native_rl_functions() -> None:
     actor_critic = interpret(ActorCriticOperator(common, policy, value))
     assert actor_critic.actor is actor_critic.policy
     assert actor_critic.critic is actor_critic.qvalue[0]
+
+    value_view = interpret(ValueOperator(torch.nn.Linear(3, 1), in_keys=["observation"]))
+    assert value_view.value.name == "value"
+
+    actor_value = interpret(
+        ActorValueOperator(
+            TensorDictModule(torch.nn.Linear(3, 4), ["observation"], ["hidden"]),
+            TensorDictModule(torch.nn.Linear(4, 2), ["hidden"], ["action"]),
+            TensorDictModule(torch.nn.Linear(4, 1), ["hidden"], ["state_value"]),
+        )
+    )
+    assert actor_value.actor is actor_value.policy
+    assert actor_value.critic is actor_value.value
 
 
 def test_unknown_objectives_fail_instead_of_guessing_network_roles() -> None:
@@ -136,6 +155,23 @@ def test_sac_and_iql_preserve_qvalue_ensemble_members() -> None:
     assert len(iql.qvalue) == len(iql.target.qvalue) == 2
     assert iql.actor.module is iql.loss.actor_network
     assert iql.value.module is iql.loss.value_network
+
+
+def test_sac_exposes_optional_value_and_delayed_actor_components() -> None:
+    loss = SACLoss(
+        _actor(),
+        _qvalue(),
+        ValueOperator(torch.nn.Linear(3, 1), in_keys=["observation"]),
+        num_qvalue_nets=1,
+        delay_actor=True,
+        delay_value=True,
+    )
+    sac = interpret(loss)
+
+    assert len(sac.qvalue) == len(sac.target.qvalue) == 1
+    assert sac.value.module is loss.value_network
+    assert sac.target.value.params is loss.target_value_network_params
+    assert sac.target.actor.params is loss.target_actor_network_params
 
 
 def test_qmixer_exposes_local_mixer_and_joint_online_and_target_views() -> None:

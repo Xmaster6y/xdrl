@@ -1,8 +1,9 @@
 import pytest
 import torch
-from tensordict import TensorDict
+from tensordict import NonTensorData, TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.modules import LSTMModule
+from torchrl.objectives import LossModule
 
 from xdrl import RecurrentSemantics, RecurrentStateTransition, interpret
 
@@ -72,6 +73,27 @@ def test_recurrent_transition_rejects_changed_shape() -> None:
 
     with pytest.raises(ValueError, match="changed shape or dtype"):
         component(data)
+
+
+def test_recurrent_component_can_be_derived_and_requires_tensor_states() -> None:
+    module = TensorDictModule(torch.nn.Identity(), ["state"], [("next", "state")])
+    recurrent = RecurrentSemantics((RecurrentStateTransition("state", ("next", "state")),))
+    component = interpret(module).with_recurrent(recurrent)
+    inputs = TensorDict({"state": torch.zeros(1)}, batch_size=[])
+    outputs = TensorDict(
+        {"state": torch.zeros(1), ("next", "state"): NonTensorData("bad")},
+        batch_size=[],
+    )
+
+    assert component.recurrent is recurrent
+    with pytest.raises(TypeError, match="tensor-valued keys"):
+        component.validate_output(inputs, outputs)
+
+
+def test_recurrent_semantics_must_be_attached_to_a_selected_loss_component() -> None:
+    recurrent = RecurrentSemantics((RecurrentStateTransition("state", ("next", "state")),))
+    with pytest.raises(TypeError, match="selected loss component"):
+        interpret(LossModule(), recurrent=recurrent)
 
 
 def test_recurrent_semantics_reject_empty_and_duplicate_keys() -> None:

@@ -63,6 +63,16 @@ def test_interpret_rejects_invalid_module_and_result_types() -> None:
         interpret(InvalidOutput())(TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2]))
 
 
+def test_component_rejects_invalid_identity_and_parameter_source() -> None:
+    module = TensorDictModule(torch.nn.Linear(2, 1), ["observation"], ["action"])
+    with pytest.raises(TypeError, match="TensorDictModuleBase"):
+        Component(torch.nn.Linear(2, 1))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="name must be non-empty"):
+        Component(module, name="")
+    with pytest.raises(TypeError, match="do not support TensorDict.to_module"):
+        Component(module, params=object()).parameter_context()  # type: ignore[arg-type]
+
+
 def test_component_preserves_caller_owned_torch_state() -> None:
     class Probe(torch.nn.Module):
         def __init__(self) -> None:

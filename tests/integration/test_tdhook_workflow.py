@@ -97,3 +97,12 @@ def test_component_run_rejects_invalid_workflow() -> None:
     data = TensorDict({"observation": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
     with pytest.raises(TypeError, match="workflow must be"):
         _component().run(object(), data)  # type: ignore[arg-type]
+
+
+def test_component_run_rejects_an_invalid_tdhook_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    workflow = Workflow(ActivationCaching("module.shared"))
+    monkeypatch.setattr(Workflow, "run_with_plan", lambda self, module, data: object())
+    data = TensorDict({"observation": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
+
+    with pytest.raises(TypeError, match="invalid result"):
+        _component().run(workflow, data)
