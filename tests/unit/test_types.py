@@ -35,6 +35,24 @@ def test_schema_rejects_duplicate_keys_and_batch_names() -> None:
         BatchSemantics(("env", "env"))
 
 
+def test_schema_rejects_invalid_declarations() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        BatchSemantics(("",))
+    with pytest.raises(ValueError, match="non-empty"):
+        KeySchema("", KeyRole.VALUE)
+    with pytest.raises(TypeError, match="required must be a boolean"):
+        KeySchema("value", KeyRole.VALUE, required=1)  # type: ignore[arg-type]
+
+
+def test_schema_rejects_non_tensordict_and_non_tensor_values() -> None:
+    schema = TensorDictSchema((KeySchema("value", KeyRole.VALUE),))
+
+    with pytest.raises(SchemaValidationError, match="must be a TensorDict"):
+        schema.validate(object())  # type: ignore[arg-type]
+    with pytest.raises(SchemaValidationError, match="must contain"):
+        schema.validate(TensorDict({"value": "invalid"}, batch_size=[]))
+
+
 def test_schema_rejects_feature_shape_and_batch_rank_mismatches() -> None:
     schema = TensorDictSchema((KeySchema("value", KeyRole.VALUE, UnboundedContinuous(shape=(1,))),))
 

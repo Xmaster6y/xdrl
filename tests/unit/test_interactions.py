@@ -97,6 +97,35 @@ def test_interaction_restores_modes_after_failure() -> None:
     assert interaction.module.training
 
 
+def test_interaction_rejects_invalid_module_results() -> None:
+    interaction = _interaction()
+    data = TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2])
+
+    with pytest.raises(TypeError, match="must return a TensorDict"):
+        interaction._invoke(data, lambda _: object())  # type: ignore[arg-type]
+
+
+def test_interaction_rejects_non_tensordict_modules() -> None:
+    with pytest.raises(TypeError, match="TensorDictModuleBase"):
+        Interaction(torch.nn.Linear(2, 1), _interaction().spec)  # type: ignore[arg-type]
+
+
+def test_interaction_scopes_exploration_and_autocast() -> None:
+    interaction = _interaction(
+        exploration_mode="random",
+        autocast_device_type="cpu",
+        autocast_enabled=False,
+    )
+
+    result = interaction(TensorDict({"observation": torch.ones(2, 2)}, batch_size=[2]))
+
+    assert result["action"].shape == (2, 1)
+
+
 def test_interaction_spec_rejects_conflicting_modes() -> None:
     with pytest.raises(ValueError, match="cannot both"):
         _interaction(gradient_enabled=True, inference_mode=True)
+    with pytest.raises(ValueError, match="requires autocast_device_type"):
+        _interaction(autocast_enabled=True)
+    with pytest.raises(TypeError, match="training must be"):
+        _interaction(training="eval")

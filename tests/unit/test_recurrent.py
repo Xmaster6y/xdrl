@@ -101,6 +101,13 @@ def test_recurrent_keys_must_be_declared_state_boundaries() -> None:
             TensorDictSchema((KeySchema("next_state", KeyRole.STATE),)),
             recurrent=RecurrentSemantics((RecurrentStateTransition("state", "next_state"),)),
         )
+    with pytest.raises(ValueError, match="required state outputs"):
+        InteractionSpec(
+            ModelRole.ACTOR,
+            TensorDictSchema((KeySchema("state", KeyRole.STATE),)),
+            TensorDictSchema((KeySchema("next_state", KeyRole.FEATURE),)),
+            recurrent=RecurrentSemantics((RecurrentStateTransition("state", "next_state"),)),
+        )
 
 
 def test_recurrent_reset_keys_must_be_required() -> None:
@@ -118,4 +125,21 @@ def test_recurrent_reset_keys_must_be_required() -> None:
                 (RecurrentStateTransition("state", "next_state"),),
                 reset_keys=("reset",),
             ),
+        )
+
+
+def test_recurrent_semantics_reject_empty_and_duplicate_keys() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        RecurrentSemantics(())
+    with pytest.raises(ValueError, match="transition keys must be unique"):
+        RecurrentSemantics(
+            (
+                RecurrentStateTransition("state", "next_state"),
+                RecurrentStateTransition("state", "other_next_state"),
+            )
+        )
+    with pytest.raises(ValueError, match="reset keys must be unique"):
+        RecurrentSemantics(
+            (RecurrentStateTransition("state", "next_state"),),
+            reset_keys=("reset", "reset"),
         )

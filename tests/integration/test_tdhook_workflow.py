@@ -37,6 +37,12 @@ class GradientCaching(ActivationCaching):
         return ExecutionSpec(gradient_mode=GradientMode.REQUIRED)
 
 
+class NoGradientCaching(ActivationCaching):
+    @property
+    def execution_spec(self) -> ExecutionSpec:
+        return ExecutionSpec(gradient_mode=GradientMode.DISABLED)
+
+
 def _interaction(*, gradient_enabled: bool = False) -> Interaction:
     module = TensorDictModule(ReusedLayer(), in_keys=["observation"], out_keys=["action"])
     spec = InteractionSpec(
@@ -94,3 +100,21 @@ def test_run_workflow_rejects_gradient_mismatch_before_execution() -> None:
 
     assert interaction.module.module.calls == 0
     assert not interaction.module.module.shared._forward_hooks
+
+
+@pytest.mark.integration
+def test_run_workflow_rejects_disabled_gradient_execution_when_enabled() -> None:
+    interaction = _interaction(gradient_enabled=True)
+    workflow = Workflow(NoGradientCaching("module.shared"))
+    data = TensorDict({"observation": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
+
+    with pytest.raises(ValueError, match="requires gradient_enabled=False"):
+        run_workflow(interaction, workflow, data)
+
+
+def test_run_workflow_rejects_invalid_entrypoint_arguments() -> None:
+    data = TensorDict({"observation": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
+    with pytest.raises(TypeError, match="interaction must be"):
+        run_workflow(object(), Workflow(ActivationCaching("module.shared")), data)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="workflow must be"):
+        run_workflow(_interaction(), object(), data)  # type: ignore[arg-type]
