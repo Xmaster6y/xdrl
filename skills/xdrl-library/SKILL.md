@@ -26,7 +26,7 @@ provenance format, trainer, data container, or paired-experiment subsystem.
 1. Wrap the existing module once with `Interaction`.
 2. Call the interaction directly for a normal TorchRL invocation.
 3. Call `run_workflow(interaction, workflow, data)` for a TDHook workflow.
-4. Use TDHook `Target(occurrence=...)` or `HookSession` directly for repeated
+4. Use TDHook `Target(occurrences=(...,))` or `HookSession` directly for repeated
    model-internal calls.
 
 TensorDict's `batch_size` and dimension names describe the batch. The module's
