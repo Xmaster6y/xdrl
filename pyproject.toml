@@ -10,7 +10,7 @@ authors = [
 ]
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "tdhook @ git+https://github.com/Xmaster6y/tdhook@bb85c69b0d678205d5e534dfe6253fdf0a820eff",
+    "tdhook==0.2.1",
     "tensordict>=0.13,<0.14",
     "torch>=2.11",
     "torchrl>=0.13,<0.14",
@@ -63,7 +63,6 @@ build-backend = "setuptools.build_meta"
 default-groups = ["dev", "docs"]
 
 [tool.uv.sources]
-tdhook = { git = "https://github.com/Xmaster6y/tdhook", branch = "main" }
 tensordict = { git = "https://github.com/pytorch/tensordict" }
 # TorchRL main currently selects nightly CPU wheels on macOS Python 3.11/3.13;
 # mirror that upstream split until its source policy is unified.

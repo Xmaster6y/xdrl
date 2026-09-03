@@ -55,7 +55,7 @@ def test_run_workflow_returns_tdhooks_native_result() -> None:
 @pytest.mark.integration
 def test_tdhook_owns_repeated_occurrence_selection() -> None:
     interaction = _interaction()
-    target = Target("module.shared", "activation", -1, (0,), occurrence=1)
+    target = Target("module.shared", "activation", -1, (0,), occurrences=(1,))
     workflow = Workflow(ActivationCaching(target, cache_key=("activations", "selected")))
     data = TensorDict({"observation": torch.tensor([[1.0, 2.0]])}, batch_size=[1])
 
