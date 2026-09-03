@@ -1,7 +1,7 @@
 Quickstart
 ==========
 
-Install XDRL and construct one boundary around an unchanged TorchRL module:
+Install XDRL, run a small TorchRL policy, and capture one hidden activation:
 
 .. code-block:: bash
 
@@ -12,65 +12,39 @@ Install XDRL and construct one boundary around an unchanged TorchRL module:
    import torch
    from tensordict import TensorDict
    from tensordict.nn import TensorDictModule
-   from xdrl import Interaction
+   from tdhook.latent import ActivationCaching
+   from tdhook.workflow import Workflow
+   from xdrl import Interaction, run_workflow
 
    policy = TensorDictModule(
-       torch.nn.Linear(4, 2),
+       torch.nn.Sequential(
+           torch.nn.Linear(4, 8),
+           torch.nn.Tanh(),
+           torch.nn.Linear(8, 2),
+       ),
        in_keys=["observation"],
        out_keys=["action"],
    )
-   interaction = Interaction(policy)
    batch = TensorDict(
        {"observation": torch.randn(8, 4)},
        batch_size=[8],
-       names=["env"],
    )
-
-   result = interaction(batch)
-   assert result["action"].shape == (8, 2)
-
-The TorchRL module remains the source of truth for keys and specs. XDRL only
-adds semantic checks that the upstream objects do not express. For example,
-TorchRL recurrent modules can use their native ``next`` and ``is_init``
-conventions directly:
-
-.. code-block:: python
-
-   from torchrl.modules import LSTMModule
-   from xdrl import RecurrentSemantics
-
-   recurrent_policy = LSTMModule(
-       input_size=4,
-       hidden_size=8,
-       in_key="observation",
-       out_key="embedding",
+   interaction = Interaction(policy)
+   workflow = Workflow(
+       ActivationCaching("module.1", cache_key=("activations", "hidden"))
    )
-   recurrent = RecurrentSemantics.from_torchrl(
-       "recurrent_state_h",
-       "recurrent_state_c",
-   )
-   recurrent_interaction = Interaction(
-       recurrent_policy,
-       recurrent,
-   )
+   execution = run_workflow(interaction, workflow, batch)
 
-TDHook workflows
-----------------
+   assert execution.data["action"].shape == (8, 2)
+   assert execution.data["activations", "hidden", "module.1"].shape == (8, 8)
 
-``run_workflow`` is the only XDRL workflow entrypoint. It validates the
-caller's Torch state against TDHook's public plan, delegates execution to
-TDHook, and returns TDHook's native ``WorkflowResult``:
+TorchRL and TensorDict own policy execution, keys, specs, and batched data.
+TDHook owns the model-internal method: here, capturing the hidden activation.
+XDRL validates those boundaries and connects the policy to the workflow through
+``Interaction`` and ``run_workflow``. An activation capture records an internal
+value; by itself, it is not evidence that the activation causally affects the
+policy's action.
 
-.. code-block:: python
-
-   from tdhook.latent import ActivationCaching
-   from tdhook.workflow import Workflow
-   from xdrl import run_workflow
-
-   workflow = Workflow(ActivationCaching("module"))
-   execution = run_workflow(interaction, workflow, batch.clone())
-
-   assert execution.plan.model_passes == 1
-
-Use TDHook ``Target`` and ``HookSession`` directly for model-internal captures,
-replacements, gradients, and repeated-call occurrence selection.
+For recurrent TorchRL modules, see
+:class:`xdrl.interactions.RecurrentSemantics`. For richer model-internal
+workflows, continue with :doc:`tutorials`.
