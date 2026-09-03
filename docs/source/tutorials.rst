@@ -1,18 +1,12 @@
 Tutorials and reproductions
 ===========================
 
-Choose a path based on what you want to learn. If you are new to XDRL, begin
-with the feature guides and follow them in order. Complete workflows combine
-several features into a realistic investigation, while scientific
-reproductions evaluate claims from published work with their own provenance,
-controls, evidence status, and claim limits.
+Choose a notebook based on what you want to learn.
 
 Feature guides
 --------------
 
-These focused notebooks introduce one XDRL boundary or capability at a time,
-progressing from an unchanged policy interaction to model-internal observation
-and intervention.
+Learn one XDRL capability at a time, in the suggested order.
 
 .. grid:: 1 2 2 2
    :gutter: 3
@@ -48,8 +42,7 @@ and intervention.
 Complete workflows
 ------------------
 
-These task-oriented notebooks combine multiple capabilities into an end-to-end
-policy investigation.
+Follow an end-to-end policy investigation that combines multiple capabilities.
 
 .. grid:: 1 2 2 2
    :gutter: 3
@@ -64,9 +57,7 @@ policy investigation.
 Scientific reproductions
 ------------------------
 
-These paper-specific notebooks keep scientific evaluation distinct from
-product tutorials. Each reproduction states its provenance, controls, evidence
-status, and the limits of the claims it can support.
+Evaluate published work with explicit provenance, controls, and claim limits.
 
 .. grid:: 1 2 2 2
    :gutter: 3
