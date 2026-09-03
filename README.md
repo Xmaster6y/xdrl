@@ -15,8 +15,8 @@
 ![ci](https://github.com/Xmaster6y/xdrl/actions/workflows/ci.yml/badge.svg)
 [![docs](https://readthedocs.org/projects/xdrl/badge/?version=latest)](https://xdrl.readthedocs.io/en/latest/?badge=latest)
 
-Typed, inspectable [TorchRL](https://github.com/pytorch/rl) model interactions
-with [TDHook](https://github.com/Xmaster6y/tdhook) observability and intervention.
+A small integration layer between [TorchRL](https://github.com/pytorch/rl)
+modules and [TDHook](https://github.com/Xmaster6y/tdhook) workflows.
 
 ## Getting Started
 
@@ -28,42 +28,39 @@ pip install xdrl
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
-from xdrl import (
-    BatchSemantics,
-    KeyPresence,
-    KeyRole,
-    KeySchema,
-    ModelRole,
-    TensorDictSchema,
-    validate_module,
-)
+from xdrl import Interaction
 
-batch = TensorDict({"observation": torch.randn(8, 4)}, batch_size=[8])
+batch = TensorDict(
+    {"observation": torch.randn(8, 4)},
+    batch_size=[8],
+    names=["env"],
+)
 policy = TensorDictModule(
     torch.nn.Linear(4, 2),
     in_keys=["observation"],
     out_keys=["action"],
 )
-policy.role = ModelRole.ACTOR
-batch_dims = BatchSemantics(("env",))
-policy.input_schema = TensorDictSchema(
-    (KeySchema("observation", KeyRole.OBSERVATION, KeyPresence.REQUIRED),),
-    batch_dims,
-)
-policy.output_schema = TensorDictSchema(
-    (KeySchema("action", KeyRole.ACTION, KeyPresence.PRODUCED),),
-    batch_dims,
-)
+interaction = Interaction(policy)
 
-result = validate_module(policy, batch)
+result = interaction(batch)
 assert result["action"].shape == (8, 2)
 ```
+
+The TensorDict's native `batch_size` and dimension names describe its batch.
+The module's native `in_keys`, `out_keys`, and TorchRL specs remain the source
+of truth. For model-internal observation and intervention, pass the same
+interaction to `xdrl.run_workflow`; TDHook remains the owner of targets, hooks,
+planning, and cleanup.
+
+For recurrent TorchRL modules, `RecurrentSemantics.from_torchrl(...)` maps
+their native `next` state outputs and `is_init` reset key without introducing
+another recurrent module abstraction.
 
 ## Development
 
 This project uses [`uv`](https://docs.astral.sh/uv/) to manage Python
 dependencies and [`just`](https://github.com/casey/just) to run the
-conformance and documentation gates.
+test and documentation gates.
 
 ## Documentation
 
