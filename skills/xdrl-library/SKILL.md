@@ -1,12 +1,12 @@
 ---
 name: xdrl-library
-description: Build, review, or explain XDRL interpretability extensions for native TorchRL modules and objectives.
+description: Build, review, or explain XDRL interpretability extensions for native TorchRL modules and losses.
 ---
 
 # XDRL library
 
 Use XDRL to discover the RL components and parameterizations already encoded by
-native TorchRL modules and objectives, then pass the selected component to
+native TorchRL modules and losses, then pass the selected component to
 TDHook.
 
 ## Ownership

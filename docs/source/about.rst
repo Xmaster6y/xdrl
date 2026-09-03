@@ -1,14 +1,10 @@
 About ``xdrl``
 ==============
 
-``xdrl`` provides interpretability extensions for TorchRL modules and
-objectives.
-
-TorchRL and TensorDict own RL execution, data, algorithms, and parameters.
-TDHook owns generic PyTorch hooks and model-internal methods. XDRL discovers
-the RL meaning already expressed by TorchRL objects and executes those methods
-against the correct actor, critic, value, Q-value, mixer, online, or target
-parameterization.
+``xdrl`` lets TDHook operate on TorchRL modules and on the networks inside
+TorchRL losses. It selects the actor, critic, value, Q-value, mixer, or target
+parameters from the original TorchRL object; it does not describe the RL
+system again.
 
 Project links
 -------------

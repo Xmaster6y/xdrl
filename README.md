@@ -15,13 +15,8 @@
 ![ci](https://github.com/Xmaster6y/xdrl/actions/workflows/ci.yml/badge.svg)
 [![docs](https://readthedocs.org/projects/xdrl/badge/?version=latest)](https://xdrl.readthedocs.io/en/latest/?badge=latest)
 
-Interpretability extensions for [TorchRL](https://github.com/pytorch/rl).
-
-XDRL discovers the actor, critic, value functions, Q-value ensembles, mixers,
-and online or target parameterizations already present in native TorchRL
-objects. It then exposes those components to
-[TDHook](https://github.com/Xmaster6y/tdhook) without asking you to describe the
-RL system a second time.
+Use [TDHook](https://github.com/Xmaster6y/tdhook) methods on native
+[TorchRL](https://github.com/pytorch/rl) modules and losses.
 
 ## Getting Started
 
@@ -37,7 +32,7 @@ from tdhook.latent import ActivationCaching
 from tdhook.workflow import Workflow
 from xdrl import interpret
 
-policy = TensorDictModule(
+model = TensorDictModule(
     torch.nn.Sequential(
         torch.nn.Linear(4, 8),
         torch.nn.Tanh(),
@@ -46,34 +41,31 @@ policy = TensorDictModule(
     in_keys=["observation"],
     out_keys=["action"],
 )
-batch = TensorDict(
-    {"observation": torch.randn(8, 4)},
-    batch_size=[8],
+policy = interpret(model)
+batch = TensorDict({"observation": torch.randn(8, 4)}, batch_size=[8])
+result = policy.run(
+    Workflow(ActivationCaching("module.1", cache_key=("activations", "hidden"))),
+    batch,
 )
-policy = interpret(policy)
-workflow = Workflow(
-    ActivationCaching("module.1", cache_key=("activations", "hidden"))
-)
-execution = policy.run(workflow, batch)
 
-assert execution.data["action"].shape == (8, 2)
-assert execution.data["activations", "hidden", "module.1"].shape == (8, 8)
+assert result.data["action"].shape == (8, 2)
+assert result.data["activations", "hidden", "module.1"].shape == (8, 8)
 ```
 
-TorchRL and TensorDict own policy execution, keys, specs, parameters, and
-batched data. TDHook owns the model-internal method: here, capturing the hidden
-activation. XDRL's `interpret` view connects them and validates the call
-boundary. An activation capture records an internal value; by itself, it is not
-evidence that the activation causally affects the policy's action.
+`interpret` preserves the TensorDict API and adds `.run(...)` for TDHook
+workflows. Given a TorchRL loss, it also selects the networks and parameters
+already owned by that loss:
 
-XDRL also understands native TorchRL objectives. For example,
-`interpret(SACLoss(...))` exposes `.actor`, each member of `.qvalue`, and each
-member of `.target.qvalue` with the correct functional parameters already
-bound. Native probabilistic actors, Q-value actors, value operators, and
-actor-value operators expose their existing RL functions in the same way;
-plain `TensorDictModule` objects remain directly executable components.
-Explicit objective integrations are included for DQN, PPO, SAC, IQL, and
-QMixer.
+```python
+sac = interpret(sac_loss)
+
+sac.actor
+sac.qvalue[0]
+sac.target.qvalue[0]
+```
+
+The target view uses TorchRL's target parameters automatically. XDRL supports
+DQN, PPO, SAC, IQL, and QMixer losses.
 
 For recurrent TorchRL modules, see `RecurrentSemantics` in the
 [API reference](https://xdrl.readthedocs.io/en/latest/api/index.html).

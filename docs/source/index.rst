@@ -34,7 +34,7 @@
 
             Hook-first interpretability for TorchRL
 
-        Interpret native TorchRL modules and objectives with TDHook workflows.
+        Use TDHook methods on TorchRL policies, value functions, and losses.
 
         .. div:: button-group
 

@@ -181,7 +181,9 @@ def _interpret_qmixer(loss: QMixerLoss) -> ObjectiveInterpretation:
     joint = Component(loss.global_value_network, "joint_qvalue", online_joint_params)
     target = QMixerTargets(local_qvalue=None, mixer=None, joint_qvalue=None)
     if loss.delay_value:
-        target_local = Component(loss.local_value_network, "target.local_qvalue", loss.target_local_value_network_params)
+        target_local = Component(
+            loss.local_value_network, "target.local_qvalue", loss.target_local_value_network_params
+        )
         target_mixer = Component(loss.mixer_network, "target.mixer", loss.target_mixer_network_params)
         target_joint = Component(
             loss.global_value_network,
