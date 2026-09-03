@@ -1,7 +1,7 @@
 [project]
 name = "xdrl"
-version = "0.2.0"
-description = "A small integration layer for TorchRL modules and TDHook workflows."
+version = "0.3.0"
+description = "Interpretability extensions for TorchRL modules and objectives."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

@@ -1,12 +1,13 @@
 ---
 name: xdrl-library
-description: Build, review, or explain the integration between TorchRL TensorDict modules and native TDHook workflows.
+description: Build, review, or explain XDRL interpretability extensions for native TorchRL modules and objectives.
 ---
 
 # XDRL library
 
-Use XDRL for one concern: validating RL relationships around a native TorchRL
-module call before passing the unchanged module to TDHook.
+Use XDRL to discover the RL components and parameterizations already encoded by
+native TorchRL modules and objectives, then pass the selected component to
+TDHook.
 
 ## Ownership
 
@@ -14,18 +15,21 @@ module call before passing the unchanged module to TDHook.
   replay, losses, and optimisation.
 - TDHook owns model-internal targets, hooks, captures, replacements, workflows,
   planning, occurrences, artifacts, and cleanup.
-- XDRL owns the interaction bridge and minimal recurrent boundary checks.
+- XDRL owns explicit TorchRL adapters, bounded functional-parameter binding,
+  the TDHook bridge, and minimal recurrent boundary checks.
 - Applications own experiment pairing, artifact metadata, reproducibility
   manifests, and scientific interpretation.
 
-Do not introduce an XDRL hook implementation, workflow runner class,
-provenance format, trainer, data container, or paired-experiment subsystem.
+Do not introduce an XDRL hook implementation, configuration model of the RL
+system, provenance format, trainer, data container, or paired-experiment
+subsystem.
 
 ## Entry points
 
-1. Wrap the existing module once with `Interaction`.
-2. Call the interaction directly for a normal TorchRL invocation.
-3. Call `run_workflow(interaction, workflow, data)` for a TDHook workflow.
+1. Call `interpret(module)` or `interpret(loss)` on the existing TorchRL object.
+2. Select the actor, critic, value, Q-value member, mixer, or target component
+   already exposed by that object.
+3. Call the component directly or call `component.run(workflow, data)`.
 4. Use TDHook `Target(occurrences=(...,))` or `HookSession` directly for repeated
    model-internal calls.
 
@@ -34,10 +38,10 @@ TensorDict's `batch_size` and dimension names describe the batch. The module's
 need native spec enforcement. Use
 `RecurrentSemantics.from_torchrl(...)` for TorchRL's `next` and `is_init`
 conventions. The caller owns training, autograd, inference, exploration, and
-autocast contexts; `run_workflow` checks autograd against TDHook's declared
+autocast contexts; `Component.run` checks autograd against TDHook's declared
 requirements before execution.
 
-`run_workflow` returns TDHook's native `WorkflowResult`.
+`Component.run` returns TDHook's native `WorkflowResult`.
 
 <!-- runnable-example -->
 ```python
@@ -46,15 +50,14 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from tdhook.latent import ActivationCaching
 from tdhook.workflow import Workflow
-from xdrl import Interaction, run_workflow
+from xdrl import interpret
 
 policy = TensorDictModule(torch.nn.Linear(4, 2), ["observation"], ["action"])
-interaction = Interaction(policy)
+policy = interpret(policy)
 data = TensorDict({"observation": torch.randn(8, 4)}, batch_size=[8])
 
-native = interaction(data.clone())
-result = run_workflow(
-    interaction,
+native = policy(data.clone())
+result = policy.run(
     Workflow(ActivationCaching("module", cache_key=("activations", "policy"))),
     data.clone(),
 )
@@ -62,6 +65,12 @@ result = run_workflow(
 assert native["action"].shape == (8, 2)
 assert result.plan.model_passes == 1
 ```
+
+For a supported TorchRL loss, never redeclare its architecture. Use the
+algorithm adapter directly, for example `interpret(sac_loss).target.qvalue[0]`.
+Explicit adapters exist for DQN, PPO, SAC, IQL, and QMixer. Unsupported losses
+must fail closed or register a dedicated `interpret_objective` implementation;
+do not guess roles from attribute names.
 
 Installation and local execution do not by themselves establish behavioral or
 scientific conclusions. Name the exact tests or experiment controls supporting

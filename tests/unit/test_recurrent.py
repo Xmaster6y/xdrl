@@ -4,13 +4,13 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.modules import LSTMModule
 
-from xdrl import Interaction, RecurrentSemantics, RecurrentStateTransition
+from xdrl import RecurrentSemantics, RecurrentStateTransition, interpret
 
 
 def test_torchrl_lstm_conventions_are_supported_directly() -> None:
     module = LSTMModule(input_size=3, hidden_size=4, in_key="observation", out_key="embedding")
     recurrent = RecurrentSemantics.from_torchrl("recurrent_state_h", "recurrent_state_c")
-    interaction = Interaction(module, recurrent)
+    component = interpret(module, recurrent=recurrent)
     data = TensorDict(
         {
             "observation": torch.ones(2, 3),
@@ -21,7 +21,7 @@ def test_torchrl_lstm_conventions_are_supported_directly() -> None:
         batch_size=[2],
     )
 
-    result = interaction(data)
+    result = component(data)
 
     assert result["next", "recurrent_state_h"].shape == data["recurrent_state_h"].shape
     assert result["next", "recurrent_state_c"].shape == data["recurrent_state_c"].shape
@@ -30,11 +30,11 @@ def test_torchrl_lstm_conventions_are_supported_directly() -> None:
 def test_recurrent_semantics_must_match_module_keys() -> None:
     module = TensorDictModule(torch.nn.Identity(), ["state"], ["next_state"])
     with pytest.raises(ValueError, match="is not a module input"):
-        Interaction(module, recurrent=RecurrentSemantics((RecurrentStateTransition("missing", "next_state"),)))
+        interpret(module, recurrent=RecurrentSemantics((RecurrentStateTransition("missing", "next_state"),)))
     with pytest.raises(ValueError, match="is not a module output"):
-        Interaction(module, recurrent=RecurrentSemantics((RecurrentStateTransition("state", "missing"),)))
+        interpret(module, recurrent=RecurrentSemantics((RecurrentStateTransition("state", "missing"),)))
     with pytest.raises(ValueError, match="reset key .* is not a module input"):
-        Interaction(
+        interpret(
             module,
             recurrent=RecurrentSemantics(
                 (RecurrentStateTransition("state", "next_state"),),
@@ -49,9 +49,9 @@ def test_recurrent_reset_must_be_boolean() -> None:
         ["state", "is_init"],
         [("next", "state")],
     )
-    interaction = Interaction(
+    component = interpret(
         module,
-        RecurrentSemantics.from_torchrl("state"),
+        recurrent=RecurrentSemantics.from_torchrl("state"),
     )
     data = TensorDict(
         {"state": torch.zeros(2, 3), "is_init": torch.zeros(2)},
@@ -59,19 +59,19 @@ def test_recurrent_reset_must_be_boolean() -> None:
     )
 
     with pytest.raises(ValueError, match="boolean"):
-        interaction(data)
+        component(data)
 
 
 def test_recurrent_transition_rejects_changed_shape() -> None:
     module = TensorDictModule(lambda state: state[:, :-1], ["state"], [("next", "state")])
-    interaction = Interaction(
+    component = interpret(
         module,
-        RecurrentSemantics((RecurrentStateTransition("state", ("next", "state")),)),
+        recurrent=RecurrentSemantics((RecurrentStateTransition("state", ("next", "state")),)),
     )
     data = TensorDict({"state": torch.zeros(2, 3)}, batch_size=[2])
 
     with pytest.raises(ValueError, match="changed shape or dtype"):
-        interaction(data)
+        component(data)
 
 
 def test_recurrent_semantics_reject_empty_and_duplicate_keys() -> None:

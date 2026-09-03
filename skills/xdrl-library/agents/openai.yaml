@@ -1,4 +1,4 @@
 interface:
   display_name: "XDRL Library"
   short_description: "Build clean TorchRL and TDHook workflows"
-  default_prompt: "Use $xdrl-library to connect a TorchRL interaction to TDHook with XDRL."
+  default_prompt: "Use $xdrl-library to interpret native TorchRL modules or objectives with TDHook."

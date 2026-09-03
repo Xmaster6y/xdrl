@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import zipfile
+from pathlib import Path
 
 import pytest
 from setuptools.build_meta import build_wheel
-
 
 ROOT = Path(__file__).parents[2]
 SKILL = ROOT / "skills" / "xdrl-library" / "SKILL.md"
@@ -53,6 +52,6 @@ def test_skill_examples_use_the_installed_public_api(tmp_path: Path) -> None:
 def test_library_skill_describes_the_current_public_boundary() -> None:
     skill = SKILL.read_text()
 
-    assert "run_workflow(interaction, workflow, data)" in skill
+    assert "component.run(workflow, data)" in skill
     assert "Target(occurrences=(...,))" in skill
     assert "TDHook's native `WorkflowResult`" in skill
