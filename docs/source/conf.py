@@ -28,11 +28,7 @@ bibtex_bibfiles = ["references.bib"]
 bibtex_default_style = "unsrt"
 
 templates_path = ["_templates"]
-exclude_patterns = [
-    "notebooks/end-to-end-policy-investigation.ipynb",
-    "notebooks/intervention.ipynb",
-    "reproductions/*.ipynb",
-]
+exclude_patterns = []
 fixed_sidebar = True
 
 
