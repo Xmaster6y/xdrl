@@ -1,6 +1,19 @@
 Tutorials and reproductions
 ===========================
 
+Choose a path based on what you want to learn. If you are new to XDRL, begin
+with the feature guides and follow them in order. Complete workflows combine
+several features into a realistic investigation, while scientific
+reproductions evaluate claims from published work with their own provenance,
+controls, evidence status, and claim limits.
+
+Feature guides
+--------------
+
+These focused notebooks introduce one XDRL boundary or capability at a time,
+progressing from an unchanged policy interaction to model-internal observation
+and intervention.
+
 .. grid:: 1 2 2 2
    :gutter: 3
 
@@ -32,12 +45,31 @@ Tutorials and reproductions
 
       Apply a focused TDHook intervention through an XDRL interaction.
 
+Complete workflows
+------------------
+
+These task-oriented notebooks combine multiple capabilities into an end-to-end
+policy investigation.
+
+.. grid:: 1 2 2 2
+   :gutter: 3
+
    .. grid-item-card:: End-to-end investigation
       :link: notebooks/end-to-end-policy-investigation
       :link-type: doc
       :class-card: surface
 
       Run matched diagnosis and intervention workflows on one policy.
+
+Scientific reproductions
+------------------------
+
+These paper-specific notebooks keep scientific evaluation distinct from
+product tutorials. Each reproduction states its provenance, controls, evidence
+status, and the limits of the claims it can support.
+
+.. grid:: 1 2 2 2
+   :gutter: 3
 
    .. grid-item-card:: BiXRL functional modularity
       :link: reproductions/bixrl-functional-modularity
@@ -78,8 +110,8 @@ Tutorials and reproductions
    :hidden:
 
    notebooks/collection.ipynb
-   notebooks/internal-computation.ipynb
    notebooks/workflow-evidence.ipynb
+   notebooks/internal-computation.ipynb
    notebooks/intervention.ipynb
    notebooks/end-to-end-policy-investigation.ipynb
    reproductions/bixrl-functional-modularity.ipynb
