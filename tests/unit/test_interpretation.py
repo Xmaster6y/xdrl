@@ -1,4 +1,5 @@
-from typing import ClassVar
+from contextlib import AbstractContextManager
+from typing import Any, ClassVar, get_type_hints
 
 import pytest
 import torch
@@ -71,6 +72,10 @@ def test_component_rejects_invalid_identity_and_parameter_source() -> None:
         Component(module, name="")
     with pytest.raises(TypeError, match="do not support TensorDict.to_module"):
         Component(module, params=object()).parameter_context()  # type: ignore[arg-type]
+
+
+def test_component_runtime_annotations_are_resolvable() -> None:
+    assert get_type_hints(Component.parameter_context)["return"] == AbstractContextManager[Any]
 
 
 def test_component_preserves_caller_owned_torch_state() -> None:

@@ -80,6 +80,7 @@ def test_known_torchrl_modules_expose_their_native_rl_functions() -> None:
     actor_critic = interpret(ActorCriticOperator(common, policy, value))
     assert actor_critic.actor is actor_critic.policy
     assert actor_critic.critic is actor_critic.qvalue[0]
+    assert actor_critic.value is None
 
     value_view = interpret(ValueOperator(torch.nn.Linear(3, 1), in_keys=["observation"]))
     assert value_view.value.name == "value"
@@ -172,6 +173,29 @@ def test_sac_exposes_optional_value_and_delayed_actor_components() -> None:
     assert sac.value.module is loss.value_network
     assert sac.target.value.params is loss.target_value_network_params
     assert sac.target.actor.params is loss.target_actor_network_params
+    data = TensorDict(
+        {"observation": torch.zeros(2, 3), "action": torch.zeros(2, 2)},
+        batch_size=[2],
+    )
+    assert sac.qvalue[0](data.clone())["state_action_value"].shape == (2, 1)
+    assert sac.target.qvalue[0](data.clone())["state_action_value"].shape == (2, 1)
+
+
+def test_iql_single_qvalue_member_binds_unbatched_parameters() -> None:
+    loss = IQLLoss(
+        _actor(),
+        _qvalue(),
+        ValueOperator(torch.nn.Linear(3, 1), in_keys=["observation"]),
+        num_qvalue_nets=1,
+    )
+    objective = interpret(loss)
+    data = TensorDict(
+        {"observation": torch.zeros(2, 3), "action": torch.zeros(2, 2)},
+        batch_size=[2],
+    )
+
+    assert objective.qvalue[0](data.clone())["state_action_value"].shape == (2, 1)
+    assert objective.target.qvalue[0](data.clone())["state_action_value"].shape == (2, 1)
 
 
 def test_qmixer_exposes_local_mixer_and_joint_online_and_target_views() -> None:
@@ -196,7 +220,13 @@ def test_qmixer_exposes_local_mixer_and_joint_online_and_target_views() -> None:
         in_keys=[("agents", "chosen_action_value"), "state"],
         out_keys=["chosen_action_value"],
     )
-    objective = interpret(QMixerLoss(local_qvalue, mixer, action_space="categorical", delay_value=True))
+    loss = QMixerLoss(local_qvalue, mixer, action_space="categorical", delay_value=True)
+    with torch.no_grad():
+        loss.local_value_network_params.apply_(lambda value: value.zero_())
+        loss.mixer_network_params.apply_(lambda value: value.zero_())
+        loss.target_local_value_network_params.apply_(lambda value: value.fill_(1))
+        loss.target_mixer_network_params.apply_(lambda value: value.fill_(1))
+    objective = interpret(loss)
     data = TensorDict(
         {
             "agents": TensorDict({"observation": torch.zeros(5, agents, 3)}, batch_size=[5, agents]),
@@ -207,5 +237,7 @@ def test_qmixer_exposes_local_mixer_and_joint_online_and_target_views() -> None:
 
     assert isinstance(objective.local_qvalue, Component)
     assert isinstance(objective.mixer, Component)
-    assert objective.joint_qvalue(data.clone())["chosen_action_value"].shape == (5, 1)
-    assert objective.target.joint_qvalue(data.clone())["chosen_action_value"].shape == (5, 1)
+    online = objective.joint_qvalue(data.clone())["chosen_action_value"]
+    target = objective.target.joint_qvalue(data.clone())["chosen_action_value"]
+    torch.testing.assert_close(online, torch.zeros(5, 1))
+    assert not torch.allclose(target, online)

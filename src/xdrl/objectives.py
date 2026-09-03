@@ -205,8 +205,10 @@ def _interpret_qmixer(loss: QMixerLoss) -> ObjectiveInterpretation:
 
 
 def _ensemble(module: TensorDictModuleBase, name: str, params: TensorDict, count: int) -> tuple[Component, ...]:
-    if count == 1 or params.ndim == 0:
+    if params.ndim == 0:
         return (Component(module, name, params),)
+    if count == 1:
+        return (Component(module, name, params[0]),)
     return tuple(Component(module, f"{name}[{index}]", params[index]) for index in range(count))
 
 

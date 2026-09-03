@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -14,8 +14,6 @@ from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
-
     from xdrl.modules import ModuleInterpretation
     from xdrl.objectives import ObjectiveInterpretation
 
