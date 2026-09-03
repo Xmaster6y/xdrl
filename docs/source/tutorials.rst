@@ -1,6 +1,13 @@
 Tutorials and reproductions
 ===========================
 
+Choose a notebook based on what you want to learn.
+
+Feature guides
+--------------
+
+Learn one XDRL capability at a time, in the suggested order.
+
 .. grid:: 1 2 2 2
    :gutter: 3
 
@@ -32,12 +39,28 @@ Tutorials and reproductions
 
       Apply a focused TDHook intervention through an XDRL interaction.
 
+Complete workflows
+------------------
+
+Follow an end-to-end policy investigation that combines multiple capabilities.
+
+.. grid:: 1 2 2 2
+   :gutter: 3
+
    .. grid-item-card:: End-to-end investigation
       :link: notebooks/end-to-end-policy-investigation
       :link-type: doc
       :class-card: surface
 
       Run matched diagnosis and intervention workflows on one policy.
+
+Scientific reproductions
+------------------------
+
+Evaluate published work with explicit provenance, controls, and claim limits.
+
+.. grid:: 1 2 2 2
+   :gutter: 3
 
    .. grid-item-card:: BiXRL functional modularity
       :link: reproductions/bixrl-functional-modularity
@@ -78,8 +101,8 @@ Tutorials and reproductions
    :hidden:
 
    notebooks/collection.ipynb
-   notebooks/internal-computation.ipynb
    notebooks/workflow-evidence.ipynb
+   notebooks/internal-computation.ipynb
    notebooks/intervention.ipynb
    notebooks/end-to-end-policy-investigation.ipynb
    reproductions/bixrl-functional-modularity.ipynb
