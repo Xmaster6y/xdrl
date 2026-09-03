@@ -28,33 +28,42 @@ pip install xdrl
 import torch
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
-from xdrl import Interaction
+from tdhook.latent import ActivationCaching
+from tdhook.workflow import Workflow
+from xdrl import Interaction, run_workflow
 
-batch = TensorDict(
-    {"observation": torch.randn(8, 4)},
-    batch_size=[8],
-    names=["env"],
-)
 policy = TensorDictModule(
-    torch.nn.Linear(4, 2),
+    torch.nn.Sequential(
+        torch.nn.Linear(4, 8),
+        torch.nn.Tanh(),
+        torch.nn.Linear(8, 2),
+    ),
     in_keys=["observation"],
     out_keys=["action"],
 )
+batch = TensorDict(
+    {"observation": torch.randn(8, 4)},
+    batch_size=[8],
+)
 interaction = Interaction(policy)
+workflow = Workflow(
+    ActivationCaching("module.1", cache_key=("activations", "hidden"))
+)
+execution = run_workflow(interaction, workflow, batch)
 
-result = interaction(batch)
-assert result["action"].shape == (8, 2)
+assert execution.data["action"].shape == (8, 2)
+assert execution.data["activations", "hidden", "module.1"].shape == (8, 8)
 ```
 
-The TensorDict's native `batch_size` and dimension names describe its batch.
-The module's native `in_keys`, `out_keys`, and TorchRL specs remain the source
-of truth. For model-internal observation and intervention, pass the same
-interaction to `xdrl.run_workflow`; TDHook remains the owner of targets, hooks,
-planning, and cleanup.
+TorchRL and TensorDict own policy execution, keys, specs, and batched data.
+TDHook owns the model-internal method: here, capturing the hidden activation.
+XDRL validates those boundaries and connects the policy to the workflow through
+`Interaction` and `run_workflow`. An activation capture records an internal
+value; by itself, it is not evidence that the activation causally affects the
+policy's action.
 
-For recurrent TorchRL modules, `RecurrentSemantics.from_torchrl(...)` maps
-their native `next` state outputs and `is_init` reset key without introducing
-another recurrent module abstraction.
+For recurrent TorchRL modules, see `RecurrentSemantics` in the
+[API reference](https://xdrl.readthedocs.io/en/latest/api/index.html).
 
 ## Development
 
