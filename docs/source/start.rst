@@ -36,29 +36,8 @@ Use a TDHook method on a TorchRL policy:
    assert result.data["activations", "hidden", "module.1"].shape == (8, 8)
 
 ``interpret`` keeps the native TensorDict call and adds ``.run(...)`` for
-TDHook workflows.
-
-Select a network from a loss
-----------------------------
-
-TorchRL losses already hold their actor, critic, value, and target parameters.
-XDRL exposes them directly:
-
-.. code-block:: python
-
-   sac = interpret(sac_loss)
-
-   actor = sac.actor
-   first_q = sac.qvalue[0]
-   first_target_q = sac.target.qvalue[0]
-
-Each selection is callable and provides ``.run(workflow, data)``. The last one
-uses TorchRL's target parameters automatically; no second network description
-is needed.
-
-XDRL supports DQN, PPO, SAC, IQL, and QMixer losses, plus TorchRL actor, value,
-Q-value, and actor-critic modules. Unknown losses fail clearly instead of
-guessing their structure.
+TDHook workflows. The policy, TensorDict keys, and execution behavior remain
+native to TorchRL; XDRL only supplies the interpretability view.
 
 For recurrent TorchRL modules, see
 :class:`xdrl.interpretation.RecurrentSemantics`. For richer model-internal

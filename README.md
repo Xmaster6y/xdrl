@@ -53,19 +53,8 @@ assert result.data["activations", "hidden", "module.1"].shape == (8, 8)
 ```
 
 `interpret` preserves the TensorDict API and adds `.run(...)` for TDHook
-workflows. Given a TorchRL loss, it also selects the networks and parameters
-already owned by that loss:
-
-```python
-sac = interpret(sac_loss)
-
-sac.actor
-sac.qvalue[0]
-sac.target.qvalue[0]
-```
-
-The target view uses TorchRL's target parameters automatically. XDRL supports
-DQN, PPO, SAC, IQL, and QMixer losses.
+workflows. The policy, TensorDict keys, and execution behavior stay native to
+TorchRL; XDRL only supplies the interpretability view.
 
 For recurrent TorchRL modules, see `RecurrentSemantics` in the
 [API reference](https://xdrl.readthedocs.io/en/latest/api/index.html).
