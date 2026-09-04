@@ -11,7 +11,7 @@ from tensordict.nn import TensorDictModuleBase
 from tensordict.utils import NestedKey
 from torchrl.modules import ActorCriticOperator, ActorValueOperator, ProbabilisticActor, QValueActor, ValueOperator
 
-from xdrl.interpretation import Component
+from xdrl.interpretation import Component, RecurrentSemantics
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,69 +24,95 @@ class ModuleInterpretation:
     critic: Component | None = None
     value: Component | None = None
     qvalue: tuple[Component, ...] = ()
+    recurrent: RecurrentSemantics | None = None
 
     def __call__(self, data: TensorDictBase) -> TensorDictBase:
         """Execute the complete native TorchRL module."""
 
-        return Component(self.module)(data)
+        return Component(self.module, recurrent=self.recurrent)(data)
 
     def run(self, workflow: Workflow, data: TensorDictBase) -> WorkflowResult:
         """Run a TDHook workflow against the complete native module."""
 
-        return Component(self.module).run(workflow, data)
+        return Component(self.module, recurrent=self.recurrent).run(workflow, data)
 
 
 @singledispatch
-def interpret_module(module: TensorDictModuleBase) -> Component | ModuleInterpretation:
+def interpret_module(
+    module: TensorDictModuleBase,
+    recurrent: RecurrentSemantics | None = None,
+) -> Component | ModuleInterpretation:
     """Interpret known TorchRL module types, preserving generic modules."""
 
-    return Component(module)
+    return Component(module, recurrent=recurrent)
 
 
 @interpret_module.register
-def _interpret_probabilistic_actor(module: ProbabilisticActor) -> ModuleInterpretation:
-    component = Component(module, "actor")
-    return ModuleInterpretation(module=module, actor=component, policy=component)
+def _interpret_probabilistic_actor(
+    module: ProbabilisticActor,
+    recurrent: RecurrentSemantics | None = None,
+) -> ModuleInterpretation:
+    component = Component(module, "actor", recurrent=recurrent)
+    return ModuleInterpretation(module=module, actor=component, policy=component, recurrent=recurrent)
 
 
 @interpret_module.register
-def _interpret_qvalue_actor(module: QValueActor) -> ModuleInterpretation:
-    component = Component(module, "qvalue")
-    return ModuleInterpretation(module=module, policy=component, qvalue=(component,))
+def _interpret_qvalue_actor(
+    module: QValueActor,
+    recurrent: RecurrentSemantics | None = None,
+) -> ModuleInterpretation:
+    component = Component(module, "qvalue", recurrent=recurrent)
+    return ModuleInterpretation(module=module, policy=component, qvalue=(component,), recurrent=recurrent)
 
 
 @interpret_module.register
-def _interpret_value_operator(module: ValueOperator) -> ModuleInterpretation:
+def _interpret_value_operator(
+    module: ValueOperator,
+    recurrent: RecurrentSemantics | None = None,
+) -> ModuleInterpretation:
     if any(_key_leaf(key) == "action" for key in module.in_keys):
-        component = Component(module, "qvalue")
-        return ModuleInterpretation(module=module, critic=component, qvalue=(component,))
-    component = Component(module, "value")
-    return ModuleInterpretation(module=module, value=component)
+        component = Component(module, "qvalue", recurrent=recurrent)
+        return ModuleInterpretation(
+            module=module,
+            critic=component,
+            qvalue=(component,),
+            recurrent=recurrent,
+        )
+    component = Component(module, "value", recurrent=recurrent)
+    return ModuleInterpretation(module=module, value=component, recurrent=recurrent)
 
 
 @interpret_module.register
-def _interpret_actor_value(module: ActorValueOperator) -> ModuleInterpretation:
-    actor = Component(module.get_policy_operator(), "actor")
-    value = Component(module.get_value_operator(), "critic")
+def _interpret_actor_value(
+    module: ActorValueOperator,
+    recurrent: RecurrentSemantics | None = None,
+) -> ModuleInterpretation:
+    actor = Component(module.get_policy_operator(), "actor", recurrent=recurrent)
+    value = Component(module.get_value_operator(), "critic", recurrent=recurrent)
     return ModuleInterpretation(
         module=module,
         actor=actor,
         policy=actor,
         critic=value,
         value=value,
+        recurrent=recurrent,
     )
 
 
 @interpret_module.register
-def _interpret_actor_critic(module: ActorCriticOperator) -> ModuleInterpretation:
-    actor = Component(module.get_policy_operator(), "actor")
-    critic = Component(module.get_critic_operator(), "critic")
+def _interpret_actor_critic(
+    module: ActorCriticOperator,
+    recurrent: RecurrentSemantics | None = None,
+) -> ModuleInterpretation:
+    actor = Component(module.get_policy_operator(), "actor", recurrent=recurrent)
+    critic = Component(module.get_critic_operator(), "critic", recurrent=recurrent)
     return ModuleInterpretation(
         module=module,
         actor=actor,
         policy=actor,
         critic=critic,
         qvalue=(critic,),
+        recurrent=recurrent,
     )
 
 

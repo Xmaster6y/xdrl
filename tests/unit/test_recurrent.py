@@ -2,10 +2,11 @@ import pytest
 import torch
 from tensordict import NonTensorData, TensorDict
 from tensordict.nn import TensorDictModule
-from torchrl.modules import LSTMModule
+from torchrl.modules import LSTMModule, ValueOperator
 from torchrl.objectives import LossModule
 
 from xdrl import RecurrentSemantics, RecurrentStateTransition, interpret
+from xdrl.modules import ModuleInterpretation
 
 
 def test_torchrl_lstm_conventions_are_supported_directly() -> None:
@@ -26,6 +27,40 @@ def test_torchrl_lstm_conventions_are_supported_directly() -> None:
 
     assert result["next", "recurrent_state_h"].shape == data["recurrent_state_h"].shape
     assert result["next", "recurrent_state_c"].shape == data["recurrent_state_c"].shape
+
+
+def test_recurrent_semantics_preserve_known_module_views() -> None:
+    class RecurrentValue(torch.nn.Module):
+        def forward(
+            self,
+            observation: torch.Tensor,
+            state: torch.Tensor,
+            is_init: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            del is_init
+            return observation[:, :1], state + 1
+
+    module = ValueOperator(
+        RecurrentValue(),
+        in_keys=["observation", "state", "is_init"],
+        out_keys=["state_value", ("next", "state")],
+    )
+    recurrent = RecurrentSemantics.from_torchrl("state")
+    interpretation = interpret(module, recurrent=recurrent)
+    data = TensorDict(
+        {
+            "observation": torch.ones(2, 3),
+            "state": torch.zeros(2, 4),
+            "is_init": torch.zeros(2, dtype=torch.bool),
+        },
+        batch_size=[2],
+    )
+
+    assert isinstance(interpretation, ModuleInterpretation)
+    assert interpretation.recurrent is recurrent
+    assert interpretation.value.recurrent is recurrent
+    result = interpretation.value(data)
+    torch.testing.assert_close(result["next", "state"], torch.ones(2, 4))
 
 
 def test_recurrent_semantics_must_match_module_keys() -> None:

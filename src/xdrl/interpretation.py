@@ -168,11 +168,9 @@ def interpret(
             from xdrl.objectives import interpret_objective
 
             return interpret_objective(subject)
-        if recurrent is not None:
-            return Component(subject, recurrent=recurrent)
         from xdrl.modules import interpret_module
 
-        return interpret_module(subject)
+        return interpret_module(subject, recurrent=recurrent)
     raise TypeError(f"cannot interpret {type(subject).__name__}; expected a TorchRL TensorDict module or loss")
 
 
