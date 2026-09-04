@@ -54,48 +54,48 @@ Follow an end-to-end policy investigation that combines multiple capabilities.
 
       Run matched diagnosis and intervention workflows on one policy.
 
-Scientific reproductions
-------------------------
+Paper-inspired examples
+-----------------------
 
-Evaluate published work with explicit provenance, controls, and claim limits.
+Learn the mechanics behind published interpretability methods on constructed examples.
 
 .. grid:: 1 2 2 2
    :gutter: 3
 
-   .. grid-item-card:: BiXRL functional modularity
+   .. grid-item-card:: Functional modules
       :link: reproductions/bixrl-functional-modularity
       :link-type: doc
       :class-card: surface
 
-      Exercise functional-modularity analysis on a bounded fixture.
+      Detect and prune modules in a synthetic classifier.
 
-   .. grid-item-card:: Emergent planning in Sokoban
+   .. grid-item-card:: Recurrent planning probes
       :link: reproductions/emergent-planning-sokoban
       :link-type: doc
       :class-card: surface
 
-      Probe repeated recurrent computations using occurrence selection.
+      Probe constructed future labels across recurrent calls.
 
-   .. grid-item-card:: MARL concept policies
+   .. grid-item-card:: Multi-agent concept policies
       :link: reproductions/marl-concept-policy
       :link-type: doc
       :class-card: surface
 
-      Evaluate concept interventions with explicit agent axes.
+      Intervene on concepts in a supervised policy example.
 
-   .. grid-item-card:: Maze goal representations
+   .. grid-item-card:: Spatial goal steering
       :link: reproductions/maze-policy-goal-representations
       :link-type: doc
       :class-card: surface
 
-      Recover and steer a spatial representation with matched controls.
+      Patch engineered goal channels in an open-grid policy.
 
-   .. grid-item-card:: NA2Q value decomposition
+   .. grid-item-card:: Additive value decomposition
       :link: reproductions/na2q-value-decomposition
       :link-type: doc
       :class-card: surface
 
-      Preserve agent and coalition structure through a mixer workflow.
+      Inspect unary and pairwise terms on generated tensors.
 
 .. toctree::
    :hidden:
