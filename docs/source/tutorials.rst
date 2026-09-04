@@ -54,48 +54,48 @@ Follow an end-to-end policy investigation that combines multiple capabilities.
 
       Run matched diagnosis and intervention workflows on one policy.
 
-Paper experiments
------------------
+Paper-inspired examples
+-----------------------
 
-Run compact versions of published interpretability experiments.
+Learn the mechanics behind published interpretability methods on constructed examples.
 
 .. grid:: 1 2 2 2
    :gutter: 3
 
-   .. grid-item-card:: BiXRL functional modularity
+   .. grid-item-card:: Functional modules
       :link: reproductions/bixrl-functional-modularity
       :link-type: doc
       :class-card: surface
 
-      Detect and test functional modules in a grid policy.
+      Detect and prune modules in a synthetic classifier.
 
-   .. grid-item-card:: Emergent planning in Sokoban
+   .. grid-item-card:: Recurrent planning probes
       :link: reproductions/emergent-planning-sokoban
       :link-type: doc
       :class-card: surface
 
-      Probe and steer repeated recurrent computations.
+      Probe constructed future labels across recurrent calls.
 
-   .. grid-item-card:: MARL concept policies
+   .. grid-item-card:: Multi-agent concept policies
       :link: reproductions/marl-concept-policy
       :link-type: doc
       :class-card: surface
 
-      Train and intervene on a multi-agent concept policy.
+      Intervene on concepts in a supervised policy example.
 
-   .. grid-item-card:: Maze goal representations
+   .. grid-item-card:: Spatial goal steering
       :link: reproductions/maze-policy-goal-representations
       :link-type: doc
       :class-card: surface
 
-      Recover and steer a spatial goal representation.
+      Patch engineered goal channels in an open-grid policy.
 
-   .. grid-item-card:: NA2Q value decomposition
+   .. grid-item-card:: Additive value decomposition
       :link: reproductions/na2q-value-decomposition
       :link-type: doc
       :class-card: surface
 
-      Inspect unary and pairwise terms in an additive mixer.
+      Inspect unary and pairwise terms on generated tensors.
 
 .. toctree::
    :hidden:
