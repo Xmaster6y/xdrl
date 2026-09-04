@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 import torch
 from tdhook.execution import GradientMode
@@ -140,11 +140,19 @@ class Component:
                     )
 
 
+if TYPE_CHECKING:
+    InterpretationResult: TypeAlias = Component | ModuleInterpretation | ObjectiveInterpretation
+else:
+    # Keep runtime annotation introspection independent of the module/objective
+    # adapters, which import Component from this module.
+    InterpretationResult: TypeAlias = object
+
+
 def interpret(
     subject: object,
     *,
     recurrent: RecurrentSemantics | None = None,
-) -> Component | ModuleInterpretation | ObjectiveInterpretation:
+) -> InterpretationResult:
     """Return the native XDRL view for a TorchRL module or supported loss.
 
     Plain TensorDict modules become :class:`Component` objects. Supported

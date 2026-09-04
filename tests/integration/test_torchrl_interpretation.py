@@ -84,6 +84,26 @@ def test_known_torchrl_modules_expose_their_native_rl_functions() -> None:
 
     value_view = interpret(ValueOperator(torch.nn.Linear(3, 1), in_keys=["observation"]))
     assert value_view.value.name == "value"
+    assert value_view.critic is None
+    assert value_view.qvalue == ()
+
+    state_action_value = interpret(ValueOperator(StateActionValue(), in_keys=["observation", "action"]))
+    assert state_action_value.critic is state_action_value.qvalue[0]
+    assert state_action_value.qvalue[0].name == "qvalue"
+    assert state_action_value.value is None
+    state_action_data = TensorDict(
+        {"observation": torch.zeros(2, 3), "action": torch.zeros(2, 2)},
+        batch_size=[2],
+    )
+    assert state_action_value.qvalue[0](state_action_data)["state_action_value"].shape == (2, 1)
+
+    nested_state_action_value = interpret(
+        ValueOperator(
+            StateActionValue(),
+            in_keys=[("agents", "observation"), ("agents", "action")],
+        )
+    )
+    assert nested_state_action_value.critic is nested_state_action_value.qvalue[0]
 
     actor_value = interpret(
         ActorValueOperator(

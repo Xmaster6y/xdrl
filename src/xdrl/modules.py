@@ -8,6 +8,7 @@ from functools import singledispatch
 from tdhook.workflow import Workflow, WorkflowResult
 from tensordict import TensorDictBase
 from tensordict.nn import TensorDictModuleBase
+from tensordict.utils import NestedKey
 from torchrl.modules import ActorCriticOperator, ActorValueOperator, ProbabilisticActor, QValueActor, ValueOperator
 
 from xdrl.interpretation import Component
@@ -56,6 +57,9 @@ def _interpret_qvalue_actor(module: QValueActor) -> ModuleInterpretation:
 
 @interpret_module.register
 def _interpret_value_operator(module: ValueOperator) -> ModuleInterpretation:
+    if any(_key_leaf(key) == "action" for key in module.in_keys):
+        component = Component(module, "qvalue")
+        return ModuleInterpretation(module=module, critic=component, qvalue=(component,))
     component = Component(module, "value")
     return ModuleInterpretation(module=module, value=component)
 
@@ -84,6 +88,10 @@ def _interpret_actor_critic(module: ActorCriticOperator) -> ModuleInterpretation
         critic=critic,
         qvalue=(critic,),
     )
+
+
+def _key_leaf(key: NestedKey) -> str:
+    return key if isinstance(key, str) else key[-1]
 
 
 __all__ = ["ModuleInterpretation", "interpret_module"]

@@ -76,6 +76,7 @@ def test_component_rejects_invalid_identity_and_parameter_source() -> None:
 
 def test_component_runtime_annotations_are_resolvable() -> None:
     assert get_type_hints(Component.parameter_context)["return"] == AbstractContextManager[Any]
+    assert get_type_hints(interpret)["return"] is object
 
 
 def test_component_preserves_caller_owned_torch_state() -> None:
