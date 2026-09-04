@@ -5,7 +5,7 @@ from tdhook.workflow import Workflow
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 
-from xdrl import Interaction, run_workflow
+from xdrl import interpret
 
 
 @pytest.mark.integration
@@ -23,10 +23,10 @@ def test_quickstart_captures_hidden_activation() -> None:
         {"observation": torch.randn(8, 4)},
         batch_size=[8],
     )
-    interaction = Interaction(policy)
+    policy = interpret(policy)
     workflow = Workflow(ActivationCaching("module.1", cache_key=("activations", "hidden")))
 
-    execution = run_workflow(interaction, workflow, batch)
+    execution = policy.run(workflow, batch)
 
     assert execution.data["action"].shape == (8, 2)
     assert execution.data["activations", "hidden", "module.1"].shape == (8, 8)

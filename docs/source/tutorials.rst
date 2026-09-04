@@ -11,19 +11,19 @@ Learn one XDRL capability at a time, in the suggested order.
 .. grid:: 1 2 2 2
    :gutter: 3
 
-   .. grid-item-card:: One interaction
+   .. grid-item-card:: Interpret one module
       :link: notebooks/collection
       :link-type: doc
       :class-card: surface
 
-      Run an unchanged TorchRL policy through one interaction.
+      Run an unchanged TorchRL policy through one interpreted component.
 
    .. grid-item-card:: Native TDHook workflow
       :link: notebooks/workflow-evidence
       :link-type: doc
       :class-card: surface
 
-      Execute a TDHook workflow through XDRL's single workflow entrypoint.
+      Execute a TDHook workflow through an interpreted TorchRL component.
 
    .. grid-item-card:: Repeated module calls
       :link: notebooks/internal-computation
@@ -37,7 +37,7 @@ Learn one XDRL capability at a time, in the suggested order.
       :link-type: doc
       :class-card: surface
 
-      Apply a focused TDHook intervention through an XDRL interaction.
+      Apply a focused TDHook intervention through an interpreted component.
 
 Complete workflows
 ------------------

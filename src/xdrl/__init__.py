@@ -1,9 +1,8 @@
-"""TorchRL interaction semantics with native TDHook workflows."""
+"""Interpretability extensions for native TorchRL objects."""
 
 from importlib.metadata import PackageNotFoundError, version
 
-from xdrl.interactions import Interaction, RecurrentSemantics, RecurrentStateTransition
-from xdrl.tdhook import run_workflow
+from xdrl.interpretation import Component, RecurrentSemantics, RecurrentStateTransition, interpret
 
 try:
     __version__ = version("xdrl")
@@ -11,8 +10,8 @@ except PackageNotFoundError:
     __version__ = "unknown version"
 
 __all__ = [
-    "Interaction",
+    "Component",
     "RecurrentSemantics",
     "RecurrentStateTransition",
-    "run_workflow",
+    "interpret",
 ]

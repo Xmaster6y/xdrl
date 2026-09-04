@@ -34,7 +34,7 @@
 
             Hook-first interpretability for TorchRL
 
-        Typed, inspectable TorchRL model interactions with TDHook workflows.
+        Use TDHook methods on TorchRL policies, value functions, and losses.
 
         .. div:: button-group
 
@@ -67,7 +67,7 @@
 
       :octicon:`play;2em;sd-text-primary`
 
-      Run one model interaction.
+      Interpret one TorchRL module.
 
    .. grid-item-card:: Tutorials
       :link: tutorials
